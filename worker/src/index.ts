@@ -58,8 +58,12 @@ function connect() {
   
   // Handle terminal resize events from client
   socket.on('resize', (data: { clientId: string, cols: number, rows: number }) => {
-    const shell = clientShells.get(data.clientId);
-    if (shell) {
+    let shell = clientShells.get(data.clientId);
+    if (!shell) {
+      // Create PTY with the specified dimensions if it doesn't exist yet
+      shell = createShellForClient(data.clientId, data.cols, data.rows);
+      clientShells.set(data.clientId, shell);
+    } else {
       try {
         shell.resize(data.cols, data.rows);
       } catch (err) {
@@ -95,10 +99,10 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
-function createShellForClient(clientId: string): pty.IPty {
+function createShellForClient(clientId: string, cols: number = 80, rows: number = 30): pty.IPty {
   const shellCmd = process.env.SHELL || 'bash';
   
-  console.log(`[Worker] Spawning PTY for client ${clientId} (${shellCmd})...`);
+  console.log(`[Worker] Spawning PTY for client ${clientId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
 
   const baseEnv = {
     PATH: process.env.PATH,
@@ -110,8 +114,8 @@ function createShellForClient(clientId: string): pty.IPty {
 
   const shell = pty.spawn(shellCmd, [], {
     name: 'xterm-256color',
-    cols: 80,
-    rows: 30,
+    cols: cols,
+    rows: rows,
     cwd: process.env.HOME,
     env: baseEnv as any
   });
