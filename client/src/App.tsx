@@ -37,6 +37,17 @@ function App() {
 
   useEffect(() => {
     selectedWorkerRef.current = selectedWorkerId;
+    // Clear terminal and request refresh when switching workers
+    if (xtermRef.current && selectedWorkerId && socketRef.current) {
+      xtermRef.current.clear();
+      // Send an empty line to trigger prompt refresh
+      setTimeout(() => {
+        socketRef.current?.emit('execute', {
+          workerId: selectedWorkerId,
+          command: '\n',
+        });
+      }, 100);
+    }
   }, [selectedWorkerId]);
 
   useEffect(() => {
