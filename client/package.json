@@ -2,8 +2,12 @@
   "name": "ultimate-terminal-client",
   "private": true,
   "version": "1.0.0",
-  "description": "Ultimate Terminal Client",
-  "author": "Stev",
+  "description": "Ultimate Terminal Client - Remote terminal access",
+  "author": {
+    "name": "Stev",
+    "email": "stev@humanizar-dev.cloud"
+  },
+  "homepage": "https://github.com/stevenvo780/ultimate-terminal",
   "main": "dist-electron/main.js",
   "type": "commonjs",
   "scripts": {
@@ -26,7 +30,7 @@
       "dist-electron/**/*"
     ],
     "linux": {
-      "target": "AppImage",
+      "target": ["AppImage"],
       "category": "Development"
     },
     "win": {

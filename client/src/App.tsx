@@ -11,7 +11,8 @@ interface Worker {
   name: string;
 }
 
-const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || 'http://localhost:3002';
+// In production (served from nexus), use relative URL. In dev, use env or localhost.
+const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || (import.meta.env.PROD ? '' : 'http://localhost:3002');
 const AUTH_KEY = 'ut-token';
 
 function App() {

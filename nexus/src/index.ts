@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -232,6 +233,20 @@ io.on('connection', (socket: Socket) => {
 });
 
 const PORT = process.env.PORT || 3002;
+
+// Serve static client files
+const clientDistPath = path.resolve(process.cwd(), 'public');
+if (existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+  // SPA fallback - serve index.html for all non-API routes
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+  console.log(`Serving client from ${clientDistPath}`);
+}
 
 bootstrapInitialPassword()
   .then(() => {
