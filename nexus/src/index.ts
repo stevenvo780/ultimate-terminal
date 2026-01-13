@@ -203,7 +203,11 @@ io.on('connection', (socket: Socket) => {
     if (socket.data.role !== 'client') return;
     const worker = workers.get(data.workerId);
     if (worker) {
-      io.to(worker.socketId).emit('resize', { cols: data.cols, rows: data.rows });
+      io.to(worker.socketId).emit('resize', { 
+        clientId: socket.id,
+        cols: data.cols, 
+        rows: data.rows 
+      });
     }
   });
 
@@ -227,6 +231,12 @@ io.on('connection', (socket: Socket) => {
       console.log(`Worker disconnected: ${workers.get(socket.id)?.name}`);
       workers.delete(socket.id);
       io.emit('worker-list', Array.from(workers.values()));
+    } else if (socket.data.role === 'client') {
+      // Notify all workers that this client has disconnected
+      console.log(`Client disconnected: ${socket.id}`);
+      workers.forEach((worker) => {
+        io.to(worker.socketId).emit('client-disconnect', { clientId: socket.id });
+      });
     }
     console.log(`Disconnected: ${socket.id}`);
   });

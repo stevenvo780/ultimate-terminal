@@ -17,7 +17,8 @@ console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 
 // Connection state management
 let socket: Socket;
-let shell: pty.IPty | null = null;
+// Map of clientId -> PTY instance
+const clientShells = new Map<string, pty.IPty>();
 let retryDelay = 1000;
 const MAX_RETRY_DELAY = 30000;
 
@@ -31,10 +32,6 @@ function connect() {
     console.log('[Worker] Connected to Nexus.');
     retryDelay = 1000; // Reset backoff
     socket.emit('register', { type: 'worker', name: WORKER_NAME, workerToken: WORKER_TOKEN });
-    
-    if (!shell) {
-      startShell();
-    }
   });
 
   socket.on('disconnect', (reason) => {
@@ -48,19 +45,40 @@ function connect() {
   });
 
   socket.on('execute', (data: { clientId: string, command: string }) => {
+    // Get or create PTY for this client
+    let shell = clientShells.get(data.clientId);
+    if (!shell) {
+      shell = createShellForClient(data.clientId);
+      clientShells.set(data.clientId, shell);
+    }
     if (shell) {
       shell.write(data.command);
     }
   });
   
   // Handle terminal resize events from client
-  socket.on('resize', (data: { cols: number, rows: number }) => {
+  socket.on('resize', (data: { clientId: string, cols: number, rows: number }) => {
+    const shell = clientShells.get(data.clientId);
     if (shell) {
       try {
         shell.resize(data.cols, data.rows);
       } catch (err) {
         // Ignore resize errors if shell is dead
       }
+    }
+  });
+
+  // Handle client disconnection
+  socket.on('client-disconnect', (data: { clientId: string }) => {
+    const shell = clientShells.get(data.clientId);
+    if (shell) {
+      console.log(`[Worker] Cleaning up PTY for client ${data.clientId}`);
+      try {
+        shell.kill();
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+      clientShells.delete(data.clientId);
     }
   });
 }
@@ -77,16 +95,10 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
-function startShell() {
-  if (shell) {
-    try {
-      shell.kill();
-    } catch (e) {}
-  }
-
+function createShellForClient(clientId: string): pty.IPty {
   const shellCmd = process.env.SHELL || 'bash';
   
-  console.log(`[Worker] Spawning PTY (${shellCmd})...`);
+  console.log(`[Worker] Spawning PTY for client ${clientId} (${shellCmd})...`);
 
   const baseEnv = {
     PATH: process.env.PATH,
@@ -96,7 +108,7 @@ function startShell() {
     COLORTERM: 'truecolor'
   } as Record<string, string | undefined>;
 
-  shell = pty.spawn(shellCmd, [], {
+  const shell = pty.spawn(shellCmd, [], {
     name: 'xterm-256color',
     cols: 80,
     rows: 30,
@@ -107,16 +119,18 @@ function startShell() {
   shell.onData((data) => {
     if (socket && socket.connected) {
       socket.emit('output', {
+        clientId: clientId,
         output: data
       });
     }
   });
 
   shell.onExit(({ exitCode, signal }) => {
-    console.log(`[Worker] Shell exited (Code: ${exitCode}, Signal: ${signal}). Restarting PTY...`);
-    // Restart shell after a brief pause
-    setTimeout(startShell, 1000);
+    console.log(`[Worker] Shell for client ${clientId} exited (Code: ${exitCode}, Signal: ${signal}).`);
+    clientShells.delete(clientId);
   });
+
+  return shell;
 }
 
 connect();
