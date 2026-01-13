@@ -18,6 +18,7 @@ interface TerminalSession {
   terminal: Terminal;
   fitAddon: FitAddon;
   containerRef: HTMLDivElement;
+  resizeHandler: () => void;
 }
 
 // In production (served from nexus), use relative URL. In dev, use env or localhost.
@@ -92,7 +93,7 @@ function App() {
     const worker = workers.find(w => w.id === workerId);
     if (!worker || !terminalContainerRef.current) return;
 
-    const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     
     // Create terminal container
     const container = document.createElement('div');
@@ -156,6 +157,7 @@ function App() {
       terminal: term,
       fitAddon: fitAddon,
       containerRef: container,
+      resizeHandler: handleResize,
     };
 
     setSessions(prev => [...prev, session]);
@@ -176,25 +178,31 @@ function App() {
   };
 
   const closeSession = (sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session) return;
+    setSessions(prevSessions => {
+      const session = prevSessions.find(s => s.id === sessionId);
+      if (!session) return prevSessions;
 
-    // Dispose terminal
-    session.terminal.dispose();
-    session.containerRef.remove();
+      // Clean up resize event listener
+      window.removeEventListener('resize', session.resizeHandler);
 
-    // Remove from sessions
-    const newSessions = sessions.filter(s => s.id !== sessionId);
-    setSessions(newSessions);
+      // Dispose terminal
+      session.terminal.dispose();
+      session.containerRef.remove();
 
-    // If closing active session, switch to another
-    if (activeSessionId === sessionId) {
-      if (newSessions.length > 0) {
-        setActiveSessionId(newSessions[newSessions.length - 1].id);
-      } else {
-        setActiveSessionId(null);
+      // Filter out the closed session
+      const newSessions = prevSessions.filter(s => s.id !== sessionId);
+
+      // If closing active session, switch to another
+      if (activeSessionId === sessionId) {
+        if (newSessions.length > 0) {
+          setActiveSessionId(newSessions[newSessions.length - 1].id);
+        } else {
+          setActiveSessionId(null);
+        }
       }
-    }
+
+      return newSessions;
+    });
   };
 
   const switchSession = (sessionId: string) => {
