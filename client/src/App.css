@@ -1,5 +1,11 @@
+html, body, #root {
+  min-width: 600px;
+  overflow-x: auto;
+}
+
 .layout {
   height: 100vh;
+  min-width: 600px;
   display: flex;
   flex-direction: column;
   background: #050505;
@@ -81,6 +87,8 @@
   flex: 1;
   display: flex;
   min-height: 0;
+  min-width: 600px;
+  overflow: auto;
 }
 
 .modal-overlay {
@@ -185,8 +193,9 @@
 .terminal-wrapper {
   background: #000;
   width: 100%;
+  min-width: 580px;
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
   padding: 6px;
 }
 
