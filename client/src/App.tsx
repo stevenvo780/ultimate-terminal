@@ -209,6 +209,17 @@ function App() {
     setActiveSessionId(sessionId);
   };
 
+  const focusOrCreateSession = (workerId: string) => {
+    const existing = sessionsRef.current.find((session) => session.workerId === workerId);
+    if (existing) {
+      setActiveSessionId(existing.id);
+      return existing;
+    }
+    return createNewSession(workerId);
+  };
+
+  const activeWorkerId = sessions.find((session) => session.id === activeSessionId)?.workerId || '';
+
   useEffect(() => {
     // Show/hide terminal containers based on active session
     sessions.forEach(session => {
@@ -335,6 +346,25 @@ function App() {
   const Controls = () => (
     <div className="topbar">
       <div className="brand">Ultimate Terminal</div>
+      <div className="control-group">
+        <label>Worker</label>
+        <select
+          value={activeWorkerId}
+          onChange={(e) => {
+            if (e.target.value) {
+              focusOrCreateSession(e.target.value);
+            }
+          }}
+          disabled={!workers.length}
+        >
+          <option value="">Seleccionar worker</option>
+          {workers.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="topbar-stats">
         <span>{sessions.length} sesión{sessions.length !== 1 ? 'es' : ''}</span>
         <span>•</span>
@@ -415,7 +445,7 @@ function App() {
           {sessions.length === 0 && token && (
             <div className="empty-state">
               <h2>No hay sesiones activas</h2>
-              <p>Crea una nueva sesión desde el sidebar</p>
+              <p>Crea una nueva sesión desde el selector superior o el sidebar</p>
             </div>
           )}
         </div>
