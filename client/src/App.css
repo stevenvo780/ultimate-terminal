@@ -35,8 +35,30 @@
   border-radius: 6px;
 }
 
-.status {
+.topbar-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-btn {
+  background: transparent;
+  border: 1px solid #243447;
+  color: #9fb3c8;
+  font-size: 1.1rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.settings-btn:hover {
+  background: #1a2332;
+  color: #fff;
+}
+
+.status {
   font-size: 0.85rem;
   padding: 4px 10px;
   border-radius: 999px;
@@ -57,18 +79,57 @@
 
 .content {
   flex: 1;
-  display: grid;
-  grid-template-columns: 320px 1fr;
+  display: flex;
   min-height: 0;
 }
 
-.sidebar {
-  border-right: 1px solid #1f1f1f;
-  padding: 16px;
-  background: #0b0b0f;
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal {
+  background: #0b0b0f;
+  border: 1px solid #243447;
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #9fb3c8;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.close-btn:hover {
+  color: #fff;
 }
 
 .auth-panel {

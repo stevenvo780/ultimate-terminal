@@ -23,6 +23,7 @@ function App() {
   const [needsSetup, setNeedsSetup] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -245,17 +246,35 @@ function App() {
           ))}
         </select>
       </div>
-      <div className={`status ${socket?.connected ? 'ok' : 'bad'}`}>{socket?.connected ? 'Conectado' : 'Desconectado'}</div>
+      <div className="topbar-right">
+        <div className={`status ${socket?.connected ? 'ok' : 'bad'}`}>{socket?.connected ? 'Conectado' : 'Desconectado'}</div>
+        {token && <button className="settings-btn" onClick={() => setShowSettings(true)}>⚙</button>}
+      </div>
     </div>
   );
 
   return (
     <div className="layout">
       <Controls />
-      <div className="content">
-        <div className="sidebar">
-          <AuthForm />
+      {!token && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <AuthForm />
+          </div>
         </div>
+      )}
+      {showSettings && token && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Configuracion</h3>
+              <button className="close-btn" onClick={() => setShowSettings(false)}>✕</button>
+            </div>
+            <AuthForm />
+          </div>
+        </div>
+      )}
+      <div className="content">
         <div className="terminal-wrapper" ref={terminalRef} />
       </div>
     </div>
