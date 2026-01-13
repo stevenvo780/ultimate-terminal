@@ -41,6 +41,12 @@ function App() {
     // Clear terminal and request refresh when switching workers
     if (xtermRef.current && selectedWorkerId && socketRef.current) {
       xtermRef.current.clear();
+      // Send resize to sync PTY dimensions with client terminal
+      socketRef.current.emit('resize', {
+        workerId: selectedWorkerId,
+        cols: xtermRef.current.cols,
+        rows: xtermRef.current.rows,
+      });
       // Send an empty line to trigger prompt refresh
       setTimeout(() => {
         socketRef.current?.emit('execute', {
@@ -73,6 +79,16 @@ function App() {
       setWorkers(list);
       if (!selectedWorkerRef.current && list.length > 0) {
         setSelectedWorkerId(list[0].id);
+        // Send initial resize when first worker is selected
+        if (xtermRef.current) {
+          setTimeout(() => {
+            newSocket.emit('resize', {
+              workerId: list[0].id,
+              cols: xtermRef.current?.cols || 80,
+              rows: xtermRef.current?.rows || 24,
+            });
+          }, 50);
+        }
       }
     });
 
