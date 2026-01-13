@@ -2,10 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { io as Client } from 'socket.io-client';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs/promises';
 
 // Configuration
 const NEXUS_PORT = 3003; // Use a different port for testing to avoid conflicts
 const NEXUS_URL = `http://localhost:${NEXUS_PORT}`;
+const ADMIN_PASSWORD = 'test-pass-123';
+const WORKER_TOKEN = 'worker-token-test';
+const JWT_SECRET = 'test-secret-token';
 
 describe('Ultimate Terminal E2E', () => {
   let nexusProcess: ChildProcess;
@@ -13,30 +17,33 @@ describe('Ultimate Terminal E2E', () => {
   let clientSocket: any;
 
   beforeAll(async () => {
-    // 1. Start Nexus
-    // We run it with a custom port env var
-    nexusProcess = spawn('npx', ['ts-node', 'nexus/src/index.ts'], {
-      env: { ...process.env, PORT: NEXUS_PORT.toString() },
-      cwd: path.resolve(__dirname, '..'),
-      stdio: 'pipe' // Silent but captured
-    });
-    
-    // Wait for Nexus to start
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await fs.rm(path.resolve(__dirname, '..', '.qodo', 'auth.json'), { force: true });
 
-    // 2. Start Worker
-    workerProcess = spawn('npx', ['ts-node', 'worker/src/index.ts'], {
-      env: { ...process.env, NEXUS_URL, WORKER_NAME: 'Test-Worker' },
+    nexusProcess = spawn('npx', ['ts-node', 'nexus/src/index.ts'], {
+      env: {
+        ...process.env,
+        PORT: NEXUS_PORT.toString(),
+        NEXUS_JWT_SECRET: JWT_SECRET,
+        ADMIN_PASSWORD,
+        WORKER_TOKEN,
+        CLIENT_ORIGIN: '*'
+      },
       cwd: path.resolve(__dirname, '..'),
       stdio: 'pipe'
     });
-    
-    // Pipe worker logs for debugging
+
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    workerProcess = spawn('npx', ['ts-node', 'worker/src/index.ts'], {
+      env: { ...process.env, NEXUS_URL, WORKER_NAME: 'Test-Worker', WORKER_TOKEN },
+      cwd: path.resolve(__dirname, '..'),
+      stdio: 'pipe'
+    });
+
     workerProcess.stdout?.on('data', (d) => console.log(`[Worker Output]: ${d}`));
 
-    // Wait for Worker to register
     await new Promise((resolve) => setTimeout(resolve, 3000));
-  }, 15000);
+  }, 20000);
 
   afterAll(() => {
     nexusProcess.kill();
@@ -45,8 +52,15 @@ describe('Ultimate Terminal E2E', () => {
   });
 
   it('should allow a client to connect and receive worker list', async () => {
+    const login = await fetch(`${NEXUS_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: ADMIN_PASSWORD })
+    });
+    const { token } = await login.json();
+
     return new Promise<void>((resolve, reject) => {
-      clientSocket = Client(NEXUS_URL);
+      clientSocket = Client(NEXUS_URL, { auth: { token, type: 'client' } });
       
       clientSocket.on('connect', () => {
         clientSocket.emit('register', { type: 'client' });
@@ -56,7 +70,6 @@ describe('Ultimate Terminal E2E', () => {
         try {
           expect(workers).toBeDefined();
           expect(Array.isArray(workers)).toBe(true);
-          // We expect at least our Test-Worker
           const found = workers.find(w => w.name === 'Test-Worker');
           expect(found).toBeDefined();
           resolve();
@@ -68,35 +81,26 @@ describe('Ultimate Terminal E2E', () => {
   });
 
   it('should execute a command and return PTY output', async () => {
-    // We assume the previous test passed and we have the worker list logic implicitly
-    // We need the worker ID. Since we can't easily share state across async socket callbacks nicely in this simple setup,
-    // we'll ask for the list again or just assume the worker is registered.
-    
     return new Promise<void>((resolve, reject) => {
-        // Wait for output
-        let outputBuffer = '';
-        
-        clientSocket.on('output', (data: any) => {
-            outputBuffer += data.data;
-            if (outputBuffer.includes('uid=')) {
-                // Success! 'id' command worked
-                resolve();
-            }
-        });
+      let outputBuffer = '';
 
-        // Get the worker ID first
-        clientSocket.emit('register', { type: 'client' });
-        clientSocket.once('worker-list', (workers: any[]) => {
-            const target = workers.find(w => w.name === 'Test-Worker');
-            if (!target) return reject(new Error('Worker not found'));
+      clientSocket.on('output', (data: any) => {
+        outputBuffer += data.data;
+        if (outputBuffer.includes('uid=')) {
+          resolve();
+        }
+      });
 
-            // Send 'id' command
-            console.log('Sending command to', target.id);
-            clientSocket.emit('execute', {
-                workerId: target.id,
-                command: 'id\n'
-            });
+      clientSocket.emit('register', { type: 'client' });
+      clientSocket.once('worker-list', (workers: any[]) => {
+        const target = workers.find((w: any) => w.name === 'Test-Worker');
+        if (!target) return reject(new Error('Worker not found'));
+
+        clientSocket.emit('execute', {
+          workerId: target.id,
+          command: 'id\n'
         });
+      });
     });
   }, 10000);
 });

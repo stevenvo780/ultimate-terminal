@@ -45,3 +45,10 @@ All installers have been successfully built and verified on this system (Fedora 
    ```bash
    npm run start:client
    ```
+
+## Configuration (env)
+- Copy `.env.example` to `.env` and adjust as needed.
+- Important:
+  - Set a strong `NEXUS_JWT_SECRET` and `ADMIN_PASSWORD` for first boot.
+  - Set the same `WORKER_TOKEN` in Nexus and each worker.
+  - Point `VITE_NEXUS_URL` and `CLIENT_ORIGIN` to your deployment URLs.

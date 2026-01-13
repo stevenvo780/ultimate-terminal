@@ -7,6 +7,11 @@ dotenv.config();
 
 const NEXUS_URL = process.env.NEXUS_URL || 'http://localhost:3002';
 const WORKER_NAME = process.env.WORKER_NAME || os.hostname();
+const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
+
+if (!WORKER_TOKEN) {
+  console.warn('[Worker] No WORKER_TOKEN provided. Registration will be rejected by Nexus.');
+}
 
 console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 
@@ -18,13 +23,14 @@ const MAX_RETRY_DELAY = 30000;
 
 function connect() {
   socket = io(NEXUS_URL, {
-    reconnection: false // We handle reconnection manually for better control
+    reconnection: false,
+    auth: { type: 'worker', workerToken: WORKER_TOKEN }
   });
 
   socket.on('connect', () => {
     console.log('[Worker] Connected to Nexus.');
     retryDelay = 1000; // Reset backoff
-    socket.emit('register', { type: 'worker', name: WORKER_NAME });
+    socket.emit('register', { type: 'worker', name: WORKER_NAME, workerToken: WORKER_TOKEN });
     
     if (!shell) {
       startShell();
@@ -61,11 +67,12 @@ function connect() {
 
 function scheduleReconnect() {
   if (socket.connected) return;
-  
-  console.log(`[Worker] Reconnecting in ${retryDelay}ms...`);
+  const jitter = Math.floor(Math.random() * 250);
+  const delay = retryDelay + jitter;
+  console.log(`[Worker] Reconnecting in ${delay}ms...`);
   setTimeout(() => {
     connect();
-  }, retryDelay);
+  }, delay);
 
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
@@ -81,16 +88,20 @@ function startShell() {
   
   console.log(`[Worker] Spawning PTY (${shellCmd})...`);
 
+  const baseEnv = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    LANG: process.env.LANG || 'en_US.UTF-8',
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor'
+  } as Record<string, string | undefined>;
+
   shell = pty.spawn(shellCmd, [], {
     name: 'xterm-256color',
     cols: 80,
     rows: 30,
     cwd: process.env.HOME,
-    env: {
-      ...process.env,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor'
-    } as any
+    env: baseEnv as any
   });
 
   shell.onData((data) => {

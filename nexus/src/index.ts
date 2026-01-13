@@ -1,18 +1,11 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-
-const app = express();
-app.use(cors());
-
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*", // Allow all for prototype
-    methods: ["GET", "POST"]
-  }
-});
+import fs from 'fs/promises';
+import path from 'path';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 
 interface Worker {
   id: string;
@@ -20,53 +13,210 @@ interface Worker {
   name: string;
 }
 
+interface AuthState {
+  passwordHash: string;
+  salt: string;
+  iterations: number;
+  updatedAt: string;
+}
+
+const app = express();
+const httpServer = createServer(app);
+
+const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const allowedOrigins = clientOrigin.split(',').map((o) => o.trim());
+const corsOrigin = allowedOrigins.includes('*') ? '*' : allowedOrigins;
+
+app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(express.json());
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: corsOrigin,
+    methods: ['GET', 'POST'],
+  },
+});
+
+const authFilePath = path.resolve(process.cwd(), '.qodo', 'auth.json');
+const jwtSecret = process.env.NEXUS_JWT_SECRET || 'dev-secret-change-me';
+const workerSharedToken = process.env.WORKER_TOKEN || '';
 const workers: Map<string, Worker> = new Map();
+
+function hashPassword(password: string, salt?: string, iterations = 150000) {
+  const resolvedSalt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, resolvedSalt, iterations, 64, 'sha512').toString('hex');
+  return { hash, salt: resolvedSalt, iterations };
+}
+
+function verifyPassword(password: string, state: AuthState) {
+  const { hash } = hashPassword(password, state.salt, state.iterations);
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(state.passwordHash, 'hex'));
+}
+
+async function ensureAuthDir() {
+  const dir = path.dirname(authFilePath);
+  await fs.mkdir(dir, { recursive: true });
+}
+
+async function loadAuthState(): Promise<AuthState | null> {
+  try {
+    const data = await fs.readFile(authFilePath, 'utf-8');
+    return JSON.parse(data) as AuthState;
+  } catch (err: any) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+async function saveAuthState(state: AuthState) {
+  await ensureAuthDir();
+  await fs.writeFile(authFilePath, JSON.stringify(state, null, 2), 'utf-8');
+}
+
+function signToken() {
+  return jwt.sign({ role: 'admin' }, jwtSecret, { expiresIn: '12h' });
+}
+
+async function bootstrapInitialPassword() {
+  const existing = await loadAuthState();
+  if (existing) return;
+  const envPassword = process.env.ADMIN_PASSWORD;
+  if (!envPassword) return;
+  const { hash, salt, iterations } = hashPassword(envPassword);
+  await saveAuthState({ passwordHash: hash, salt, iterations, updatedAt: new Date().toISOString() });
+}
+
+function extractToken(req: Request) {
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) return header.substring('Bearer '.length);
+  return undefined;
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const token = extractToken(req);
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  try {
+    jwt.verify(token, jwtSecret);
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+app.get('/api/auth/status', async (_req, res) => {
+  const state = await loadAuthState();
+  res.json({ needsSetup: !state });
+});
+
+app.post('/api/auth/setup', async (req, res) => {
+  const state = await loadAuthState();
+  if (state) return res.status(400).json({ error: 'Already configured' });
+  const { password } = req.body as { password?: string };
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  const { hash, salt, iterations } = hashPassword(password);
+  await saveAuthState({ passwordHash: hash, salt, iterations, updatedAt: new Date().toISOString() });
+  const token = signToken();
+  res.json({ token });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const state = await loadAuthState();
+  if (!state) return res.status(400).json({ error: 'Not configured' });
+  const { password } = req.body as { password?: string };
+  if (!password) return res.status(400).json({ error: 'Password required' });
+  if (!verifyPassword(password, state)) return res.status(401).json({ error: 'Invalid credentials' });
+  const token = signToken();
+  res.json({ token });
+});
+
+app.post('/api/auth/password', requireAuth, async (req, res) => {
+  const state = await loadAuthState();
+  if (!state) return res.status(400).json({ error: 'Not configured' });
+  const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Missing fields' });
+  if (!verifyPassword(currentPassword, state)) return res.status(401).json({ error: 'Invalid credentials' });
+  if (newPassword.length < 8) return res.status(400).json({ error: 'New password too short' });
+  const { hash, salt, iterations } = hashPassword(newPassword);
+  await saveAuthState({ passwordHash: hash, salt, iterations, updatedAt: new Date().toISOString() });
+  res.json({ ok: true });
+});
+
+io.use(async (socket, next) => {
+  const { token, type, workerToken } = (socket.handshake.auth || {}) as { token?: string; type?: string; workerToken?: string };
+  try {
+    if (type === 'client') {
+      if (!token) return next(new Error('Missing token'));
+      jwt.verify(token, jwtSecret);
+      socket.data.role = 'client';
+      return next();
+    }
+    if (type === 'worker') {
+      if (workerSharedToken && workerSharedToken.length > 0) {
+        if (!workerToken || workerToken !== workerSharedToken) return next(new Error('Unauthorized worker'));
+      }
+      socket.data.role = 'worker';
+      return next();
+    }
+    return next(new Error('Missing type'));
+  } catch (err) {
+    return next(err as Error);
+  }
+});
 
 io.on('connection', (socket: Socket) => {
   console.log(`New connection: ${socket.id}`);
 
-  // Identification
-  socket.on('register', (data: { type: 'worker' | 'client', name?: string }) => {
+  socket.on('register', (data: { type: 'worker' | 'client'; name?: string; workerToken?: string }) => {
     if (data.type === 'worker') {
+      if (socket.data.role !== 'worker') return;
       const worker: Worker = {
         id: socket.id,
         socketId: socket.id,
-        name: data.name || `Worker-${socket.id.substr(0, 4)}`
+        name: data.name || `Worker-${socket.id.substring(0, 4)}`,
       };
       workers.set(socket.id, worker);
       console.log(`Worker registered: ${worker.name}`);
       io.emit('worker-list', Array.from(workers.values()));
     } else {
+      if (socket.data.role !== 'client') return;
       console.log(`Client registered: ${socket.id}`);
       socket.emit('worker-list', Array.from(workers.values()));
     }
   });
 
-  // Client -> Worker (Command)
-  socket.on('execute', (data: { workerId: string, command: string }) => {
+  socket.on('execute', (data: { workerId: string; command: string }) => {
+    if (socket.data.role !== 'client') return;
+    if (!data.command || data.command.length > 4096) return;
     const worker = workers.get(data.workerId);
     if (worker) {
       io.to(worker.socketId).emit('execute', {
         clientId: socket.id,
-        command: data.command
+        command: data.command,
       });
     }
   });
 
-  // Worker -> Client (Output)
-  socket.on('output', (data: { clientId?: string, output: string }) => {
-    // If clientId is provided, send to specific client, else broadcast (or handle appropriately)
-    // For now, let's broadcast to all clients if no specific client, or just to the specific one
+  socket.on('resize', (data: { workerId: string; cols: number; rows: number }) => {
+    if (socket.data.role !== 'client') return;
+    const worker = workers.get(data.workerId);
+    if (worker) {
+      io.to(worker.socketId).emit('resize', { cols: data.cols, rows: data.rows });
+    }
+  });
+
+  socket.on('output', (data: { clientId?: string; output: string }) => {
+    if (socket.data.role !== 'worker') return;
     if (data.clientId) {
       io.to(data.clientId).emit('output', {
         workerId: socket.id,
-        data: data.output
+        data: data.output,
       });
     } else {
-      // Broadcast to all clients (e.g. status updates)
       io.emit('output', {
-         workerId: socket.id,
-         data: data.output
+        workerId: socket.id,
+        data: data.output,
       });
     }
   });
@@ -82,6 +232,17 @@ io.on('connection', (socket: Socket) => {
 });
 
 const PORT = process.env.PORT || 3002;
-httpServer.listen(PORT, () => {
-  console.log(`Nexus running on port ${PORT}`);
-});
+
+bootstrapInitialPassword()
+  .then(() => {
+    httpServer.listen(PORT, () => {
+      console.log(`Nexus running on port ${PORT}`);
+      if (!process.env.ADMIN_PASSWORD) {
+        console.log('If first run, call /api/auth/setup to configure the admin password.');
+      }
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to start Nexus:', err);
+    process.exit(1);
+  });
