@@ -1,0 +1,69 @@
+# Node monorepo dependencies
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.tsbuildinfo
+
+# Build output
+.dist/
+dist/
+dist-ssr/
+dist-electron/
+release/
+linux-unpacked/
+win-unpacked/
+**/build/
+.vite/
+coverage/
+tmp/
+*.log
+logs/
+*.pid
+
+# Bundled binaries & installers
+bin/
+*.exe
+*.AppImage
+*.blockmap
+*.asar
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.msi
+*.tar.gz
+*.tgz
+*.zip
+
+# Environment & local config
+.env
+.env.*
+*.local
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.qodo/
+
+# Capacitor/Android generated files
+client/android/.gradle/
+client/android/capacitor-cordova-android-plugins/
+client/android/app/build/
+client/android/build/
+client/android/out/
+client/android/**/.cxx/
+client/android/**/local.properties
+client/android/**/captures/
+
+# App outputs
+client/dist/
+client/dist-electron/
+client/release/
+worker/bin/
+nexus/dist/
+client.log
+nexus.log
+worker.log

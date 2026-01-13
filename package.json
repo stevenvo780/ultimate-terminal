@@ -1,0 +1,20 @@
+{
+  "name": "ultimate-terminal",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "nexus",
+    "worker",
+    "client"
+  ],
+  "scripts": {
+    "start:nexus": "npm run start --workspace=nexus",
+    "start:worker": "npm run start --workspace=worker",
+    "start:client": "npm run dev --workspace=client"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.6",
+    "ts-node": "^10.9.2",
+    "vitest": "^4.0.17"
+  }
+}
