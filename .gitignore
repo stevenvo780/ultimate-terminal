@@ -67,3 +67,10 @@ nexus/dist/
 client.log
 nexus.log
 worker.log
+
+# Binarios grandes
+deploy/worker-linux
+deploy/nexus-linux
+worker/bin/
+nexus/bin/
+*.node
