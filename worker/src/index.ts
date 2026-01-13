@@ -114,8 +114,8 @@ function createShellForClient(clientId: string, cols: number = 80, rows: number 
 
   const shell = pty.spawn(shellCmd, [], {
     name: 'xterm-256color',
-    cols: cols,
-    rows: rows,
+    cols,
+    rows,
     cwd: process.env.HOME,
     env: baseEnv as any
   });
@@ -123,7 +123,7 @@ function createShellForClient(clientId: string, cols: number = 80, rows: number 
   shell.onData((data) => {
     if (socket && socket.connected) {
       socket.emit('output', {
-        clientId: clientId,
+        clientId,
         output: data
       });
     }
