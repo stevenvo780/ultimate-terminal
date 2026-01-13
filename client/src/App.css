@@ -169,22 +169,41 @@
   border-color: #2a5a9e;
 }
 
+.session-item.offline {
+  border-color: #3b2626;
+  background: #151013;
+}
+
 .session-info {
   flex: 1;
   min-width: 0;
+  display: grid;
+  gap: 4px;
 }
 
 .session-name {
   font-size: 0.9rem;
   font-weight: 500;
   color: #e7e7e7;
-  margin-bottom: 2px;
 }
 
 .session-id {
   font-size: 0.75rem;
   color: #6b7c93;
   font-family: 'Roboto Mono', monospace;
+}
+
+.badge-offline {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #4d2d2d;
+  background: #231013;
+  color: #ff8a8a;
+  font-size: 0.75rem;
 }
 
 .close-session-btn {
@@ -262,6 +281,10 @@
 .empty-state p {
   font-size: 0.9rem;
   margin: 0;
+}
+
+.muted {
+  color: #6b7c93;
 }
 
 .topbar-stats {

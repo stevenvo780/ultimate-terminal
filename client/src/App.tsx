@@ -24,6 +24,7 @@ interface TerminalSession {
 // In production (served from nexus), use relative URL. In dev, use env or localhost.
 const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || (import.meta.env.PROD ? '' : 'http://localhost:3002');
 const AUTH_KEY = 'ut-token';
+const LAST_WORKER_KEY = 'ut-last-worker';
 
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -37,10 +38,13 @@ function App() {
   
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [offlineSessions, setOfflineSessions] = useState<Set<string>>(new Set());
 
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const sessionsRef = useRef<TerminalSession[]>([]);
+  const activeSessionRef = useRef<string | null>(null);
+  const lastWorkerRef = useRef<string | null>(null);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -51,8 +55,25 @@ function App() {
   }, [sessions]);
 
   useEffect(() => {
+    activeSessionRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    const activeSession = sessions.find((s) => s.id === activeSessionId);
+    if (activeSession) {
+      localStorage.setItem(LAST_WORKER_KEY, activeSession.workerId);
+      lastWorkerRef.current = activeSession.workerId;
+    } else if (sessions.length === 0) {
+      localStorage.removeItem(LAST_WORKER_KEY);
+      lastWorkerRef.current = null;
+    }
+  }, [activeSessionId, sessions]);
+
+  useEffect(() => {
     const saved = localStorage.getItem(AUTH_KEY);
     if (saved) setToken(saved);
+    const savedWorker = localStorage.getItem(LAST_WORKER_KEY);
+    if (savedWorker) lastWorkerRef.current = savedWorker;
     fetch(`${NEXUS_URL}/api/auth/status`)
       .then((res) => res.json())
       .then((data) => setNeedsSetup(Boolean(data.needsSetup)))
@@ -70,6 +91,32 @@ function App() {
 
     newSocket.on('worker-list', (list: Worker[]) => {
       setWorkers(list);
+       setOfflineSessions(() => {
+        const offline = new Set<string>();
+        sessionsRef.current.forEach((session) => {
+          if (!list.some((w) => w.id === session.workerId)) {
+            offline.add(session.id);
+          }
+        });
+        return offline;
+      });
+
+      const preferredWorker = lastWorkerRef.current && list.some((w) => w.id === lastWorkerRef.current)
+        ? lastWorkerRef.current
+        : null;
+
+      const activeSession = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+      const activeWorkerOnline = activeSession ? list.some((w) => w.id === activeSession.workerId) : false;
+
+      if (!activeWorkerOnline) {
+        if (preferredWorker) {
+          focusOrCreateSession(preferredWorker);
+        } else if (list.length > 0) {
+          focusOrCreateSession(list[0].id);
+        } else {
+          setActiveSessionId(null);
+        }
+      }
     });
 
     newSocket.on('output', (data: { workerId: string; data: string }) => {
@@ -92,6 +139,8 @@ function App() {
   const createNewSession = (workerId: string) => {
     const worker = workers.find(w => w.id === workerId);
     if (!worker || !terminalContainerRef.current) return;
+    localStorage.setItem(LAST_WORKER_KEY, workerId);
+    lastWorkerRef.current = workerId;
 
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     
@@ -210,6 +259,8 @@ function App() {
   };
 
   const focusOrCreateSession = (workerId: string) => {
+    localStorage.setItem(LAST_WORKER_KEY, workerId);
+    lastWorkerRef.current = workerId;
     const existing = sessionsRef.current.find((session) => session.workerId === workerId);
     if (existing) {
       setActiveSessionId(existing.id);
@@ -275,9 +326,10 @@ function App() {
     setWorkers([]);
     setSessions([]);
     setActiveSessionId(null);
-    socket?.disconnect();
-    setSocket(null);
-  };
+      socket?.disconnect();
+      setSocket(null);
+      localStorage.removeItem(LAST_WORKER_KEY);
+    };
 
   const Sidebar = () => (
     <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
@@ -293,11 +345,12 @@ function App() {
             {sessions.map(session => (
               <div
                 key={session.id}
-                className={`session-item ${activeSessionId === session.id ? 'active' : ''}`}
+                className={`session-item ${activeSessionId === session.id ? 'active' : ''} ${offlineSessions.has(session.id) ? 'offline' : ''}`}
                 onClick={() => switchSession(session.id)}
               >
                 <div className="session-info">
                   <div className="session-name">{session.workerName}</div>
+                  {offlineSessions.has(session.id) && <span className="badge-offline">Offline</span>}
                   <div className="session-id">{session.id.substring(0, 12)}...</div>
                 </div>
                 <button
@@ -323,7 +376,7 @@ function App() {
             <select
               onChange={(e) => {
                 if (e.target.value) {
-                  createNewSession(e.target.value);
+                  focusOrCreateSession(e.target.value);
                   e.target.value = '';
                 }
               }}
@@ -446,6 +499,7 @@ function App() {
             <div className="empty-state">
               <h2>No hay sesiones activas</h2>
               <p>Crea una nueva sesión desde el selector superior o el sidebar</p>
+              {workers.length === 0 && <p className="muted">No hay workers conectados en este momento.</p>}
             </div>
           )}
         </div>
