@@ -9,12 +9,14 @@ interface Worker {
   id: string;
   socketId: string;
   name: string;
+  status?: 'online' | 'offline';
+  lastSeen?: string;
 }
 
 interface TerminalSession {
   id: string;
   workerId: string;
-  workerName: string;
+  displayName: string;
   terminal: Terminal;
   fitAddon: FitAddon;
   containerRef: HTMLDivElement;
@@ -25,6 +27,7 @@ interface TerminalSession {
 const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || (import.meta.env.PROD ? '' : 'http://localhost:3002');
 const AUTH_KEY = 'ut-token';
 const LAST_WORKER_KEY = 'ut-last-worker';
+type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -35,6 +38,7 @@ function App() {
   const [busy, setBusy] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -72,6 +76,7 @@ function App() {
   useEffect(() => {
     const saved = localStorage.getItem(AUTH_KEY);
     if (saved) setToken(saved);
+    if (!saved) setConnectionState('disconnected');
     const savedWorker = localStorage.getItem(LAST_WORKER_KEY);
     if (savedWorker) lastWorkerRef.current = savedWorker;
     fetch(`${NEXUS_URL}/api/auth/status`)
@@ -82,19 +87,33 @@ function App() {
 
   useEffect(() => {
     if (!token) return;
-    const newSocket = io(NEXUS_URL, { auth: { token, type: 'client' } });
+    setConnectionState('connecting');
+    const newSocket = io(NEXUS_URL, {
+      auth: { token, type: 'client' },
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
+      setConnectionState('connected');
       newSocket.emit('register', { type: 'client' });
+      // Rehidrata la sesión activa al reconectar
+      setTimeout(() => resumeActiveSession(), 100);
     });
+
+    newSocket.on('reconnect_attempt', () => setConnectionState('reconnecting'));
+    newSocket.on('reconnect', () => setConnectionState('connected'));
+    newSocket.on('disconnect', () => setConnectionState('disconnected'));
 
     newSocket.on('worker-list', (list: Worker[]) => {
       setWorkers(list);
-       setOfflineSessions(() => {
+      setOfflineSessions(() => {
         const offline = new Set<string>();
         sessionsRef.current.forEach((session) => {
-          if (!list.some((w) => w.id === session.workerId)) {
+          const worker = list.find((w) => w.id === session.workerId);
+          if (!worker || worker.status === 'offline') {
             offline.add(session.id);
           }
         });
@@ -106,13 +125,16 @@ function App() {
         : null;
 
       const activeSession = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
-      const activeWorkerOnline = activeSession ? list.some((w) => w.id === activeSession.workerId) : false;
+      const activeWorkerOnline = activeSession
+        ? list.some((w) => w.id === activeSession.workerId && w.status !== 'offline')
+        : false;
 
       if (!activeWorkerOnline) {
         if (preferredWorker) {
           focusOrCreateSession(preferredWorker);
         } else if (list.length > 0) {
-          focusOrCreateSession(list[0].id);
+          const firstOnline = list.find((w) => w.status !== 'offline') || list[0];
+          focusOrCreateSession(firstOnline.id);
         } else {
           setActiveSessionId(null);
         }
@@ -129,6 +151,7 @@ function App() {
 
     newSocket.on('connect_error', (err) => {
       setAuthError(err.message);
+      setConnectionState('reconnecting');
     });
 
     return () => {
@@ -202,7 +225,7 @@ function App() {
     const session: TerminalSession = {
       id: sessionId,
       workerId: workerId,
-      workerName: worker.name,
+      displayName: worker.name,
       terminal: term,
       fitAddon: fitAddon,
       containerRef: container,
@@ -258,6 +281,17 @@ function App() {
     setActiveSessionId(sessionId);
   };
 
+  const renameSession = (sessionId: string) => {
+    const session = sessionsRef.current.find((s) => s.id === sessionId);
+    if (!session) return;
+    const newName = window.prompt('Nuevo nombre para la sesión', session.displayName);
+    if (newName && newName.trim().length > 0) {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, displayName: newName.trim() } : s)),
+      );
+    }
+  };
+
   const focusOrCreateSession = (workerId: string) => {
     localStorage.setItem(LAST_WORKER_KEY, workerId);
     lastWorkerRef.current = workerId;
@@ -267,6 +301,21 @@ function App() {
       return existing;
     }
     return createNewSession(workerId);
+  };
+
+  const resumeActiveSession = () => {
+    const session = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+    if (!session || !socketRef.current) return;
+    session.fitAddon.fit();
+    socketRef.current.emit('resize', {
+      workerId: session.workerId,
+      cols: session.terminal.cols,
+      rows: session.terminal.rows,
+    });
+    socketRef.current.emit('execute', {
+      workerId: session.workerId,
+      command: '\n',
+    });
   };
 
   const activeWorkerId = sessions.find((session) => session.id === activeSessionId)?.workerId || '';
@@ -322,14 +371,15 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(LAST_WORKER_KEY);
     setToken(null);
     setWorkers([]);
     setSessions([]);
     setActiveSessionId(null);
-      socket?.disconnect();
-      setSocket(null);
-      localStorage.removeItem(LAST_WORKER_KEY);
-    };
+    socket?.disconnect();
+    setSocket(null);
+    setConnectionState('disconnected');
+  };
 
   const Sidebar = () => (
     <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
@@ -349,10 +399,20 @@ function App() {
                 onClick={() => switchSession(session.id)}
               >
                 <div className="session-info">
-                  <div className="session-name">{session.workerName}</div>
+                  <div className="session-name">{session.displayName}</div>
                   {offlineSessions.has(session.id) && <span className="badge-offline">Offline</span>}
                   <div className="session-id">{session.id.substring(0, 12)}...</div>
                 </div>
+                <button
+                  className="rename-session-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    renameSession(session.id);
+                  }}
+                  title="Renombrar sesión"
+                >
+                  ✎
+                </button>
                 <button
                   className="close-session-btn"
                   onClick={(e) => {
@@ -386,7 +446,7 @@ function App() {
               <option value="">Seleccionar worker...</option>
               {workers.map((w) => (
                 <option key={w.id} value={w.id}>
-                  {w.name}
+                  {w.name}{w.status === 'offline' ? ' (offline)' : ''}
                 </option>
               ))}
             </select>
@@ -413,7 +473,7 @@ function App() {
           <option value="">Seleccionar worker</option>
           {workers.map((w) => (
             <option key={w.id} value={w.id}>
-              {w.name}
+              {w.name}{w.status === 'offline' ? ' (offline)' : ''}
             </option>
           ))}
         </select>
@@ -424,7 +484,23 @@ function App() {
         <span>{workers.length} worker{workers.length !== 1 ? 's' : ''}</span>
       </div>
       <div className="topbar-right">
-        <div className={`status ${socket?.connected ? 'ok' : 'bad'}`}>{socket?.connected ? 'Conectado' : 'Desconectado'}</div>
+        {activeSessionId && (
+          <button className="resume-btn" onClick={resumeActiveSession} title="Reanudar sesión activa">
+            Reanudar
+          </button>
+        )}
+        <div className={`status ${
+          connectionState === 'connected'
+            ? 'ok'
+            : connectionState === 'reconnecting' || connectionState === 'connecting'
+              ? 'warn'
+              : 'bad'
+        }`}>
+          {connectionState === 'connected' && 'Conectado'}
+          {connectionState === 'connecting' && 'Conectando...'}
+          {connectionState === 'reconnecting' && 'Reconectando...'}
+          {connectionState === 'disconnected' && 'Desconectado'}
+        </div>
         {token && <button className="settings-btn" onClick={() => setShowSettings(true)}>⚙</button>}
       </div>
     </div>

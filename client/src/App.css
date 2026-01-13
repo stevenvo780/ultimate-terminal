@@ -77,6 +77,27 @@
   background: #1a0e0e;
 }
 
+.status.warn {
+  color: #f5d06b;
+  border-color: #4a3b1b;
+  background: #1d1609;
+}
+
+.resume-btn {
+  background: transparent;
+  border: 1px solid #2a5a9e;
+  color: #c1d9ff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.resume-btn:hover {
+  background: #1a2844;
+  color: #fff;
+}
+
 .content {
   flex: 1;
   display: flex;
@@ -216,6 +237,22 @@
   transition: color 150ms ease;
   margin-left: 8px;
   line-height: 1;
+}
+
+.rename-session-btn {
+  background: transparent;
+  border: none;
+  color: #7da5d7;
+  font-size: 1rem;
+  padding: 4px;
+  cursor: pointer;
+  transition: color 150ms ease;
+  margin-left: 4px;
+  line-height: 1;
+}
+
+.rename-session-btn:hover {
+  color: #b7d7ff;
 }
 
 .close-session-btn:hover {

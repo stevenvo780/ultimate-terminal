@@ -10,7 +10,8 @@
   "scripts": {
     "start:nexus": "npm run start --workspace=nexus",
     "start:worker": "npm run start --workspace=worker",
-    "start:client": "npm run dev --workspace=client"
+    "start:client": "npm run dev --workspace=client",
+    "test:smoke": "vitest run tests/e2e.test.ts tests/multi-client.test.ts"
   },
   "devDependencies": {
     "@types/node": "^25.0.6",

@@ -12,6 +12,8 @@ interface Worker {
   id: string;
   socketId: string;
   name: string;
+  lastSeen: number;
+  status: 'online' | 'offline';
 }
 
 interface AuthState {
@@ -39,9 +41,26 @@ const io = new Server(httpServer, {
 });
 
 const authFilePath = path.resolve(process.cwd(), '.qodo', 'auth.json');
+const auditFilePath = path.resolve(process.cwd(), '.qodo', 'audit.log');
 const jwtSecret = process.env.NEXUS_JWT_SECRET || 'dev-secret-change-me';
 const workerSharedToken = process.env.WORKER_TOKEN || '';
 const workers: Map<string, Worker> = new Map();
+const HEALTH_TIMEOUT_MS = Number(process.env.WORKER_HEALTH_TIMEOUT_MS || 15000);
+const HEALTH_CHECK_INTERVAL_MS = 5000;
+
+setInterval(() => {
+  let changed = false;
+  const now = Date.now();
+  workers.forEach((worker) => {
+    const offline = now - worker.lastSeen > HEALTH_TIMEOUT_MS;
+    const desiredStatus: Worker['status'] = offline ? 'offline' : 'online';
+    if (worker.status !== desiredStatus) {
+      worker.status = desiredStatus;
+      changed = true;
+    }
+  });
+  if (changed) broadcastWorkerList();
+}, HEALTH_CHECK_INTERVAL_MS);
 
 function hashPassword(password: string, salt?: string, iterations = 150000) {
   const resolvedSalt = salt || crypto.randomBytes(16).toString('hex');
@@ -57,6 +76,27 @@ function verifyPassword(password: string, state: AuthState) {
 async function ensureAuthDir() {
   const dir = path.dirname(authFilePath);
   await fs.mkdir(dir, { recursive: true });
+}
+
+async function appendAudit(entry: Record<string, any>) {
+  try {
+    await ensureAuthDir();
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
+    await fs.appendFile(auditFilePath, `${line}\n`, 'utf-8');
+  } catch (err) {
+    console.error('Failed to write audit entry', err);
+  }
+}
+
+function serializeWorkers() {
+  return Array.from(workers.values()).map((w) => ({
+    ...w,
+    lastSeen: w.lastSeen,
+  }));
+}
+
+function broadcastWorkerList() {
+  io.emit('worker-list', serializeWorkers());
 }
 
 async function loadAuthState(): Promise<AuthState | null> {
@@ -176,14 +216,16 @@ io.on('connection', (socket: Socket) => {
         id: socket.id,
         socketId: socket.id,
         name: data.name || `Worker-${socket.id.substring(0, 4)}`,
+        lastSeen: Date.now(),
+        status: 'online',
       };
       workers.set(socket.id, worker);
       console.log(`Worker registered: ${worker.name}`);
-      io.emit('worker-list', Array.from(workers.values()));
+      broadcastWorkerList();
     } else {
       if (socket.data.role !== 'client') return;
       console.log(`Client registered: ${socket.id}`);
-      socket.emit('worker-list', Array.from(workers.values()));
+      socket.emit('worker-list', serializeWorkers());
     }
   });
 
@@ -192,10 +234,29 @@ io.on('connection', (socket: Socket) => {
     if (!data.command || data.command.length > 4096) return;
     const worker = workers.get(data.workerId);
     if (worker) {
+      if (data.command.includes('\n') || data.command.includes('\r') || data.command.trim().length > 1) {
+        void appendAudit({
+          event: 'execute',
+          workerId: worker.id,
+          workerName: worker.name,
+          clientId: socket.id,
+          commandPreview: data.command.slice(0, 200),
+          length: data.command.length,
+        });
+      }
       io.to(worker.socketId).emit('execute', {
         clientId: socket.id,
         command: data.command,
       });
+    }
+  });
+
+  socket.on('heartbeat', () => {
+    if (socket.data.role !== 'worker') return;
+    const worker = workers.get(socket.id);
+    if (worker) {
+      worker.lastSeen = Date.now();
+      worker.status = 'online';
     }
   });
 
@@ -230,7 +291,7 @@ io.on('connection', (socket: Socket) => {
     if (workers.has(socket.id)) {
       console.log(`Worker disconnected: ${workers.get(socket.id)?.name}`);
       workers.delete(socket.id);
-      io.emit('worker-list', Array.from(workers.values()));
+      broadcastWorkerList();
     } else if (socket.data.role === 'client') {
       // Notify all workers that this client has disconnected
       console.log(`Client disconnected: ${socket.id}`);
