@@ -98,7 +98,10 @@ function App() {
       cursorBlink: true,
       fontFamily: '"MesloLGS NF", "Fira Code", "JetBrains Mono", "Roboto Mono", "Monaco", "Courier New", monospace',
       fontSize: 14,
+      cols: 80,
+      rows: 24,
       allowTransparency: true,
+      scrollback: 5000,
       theme: {
         background: '#0d0d0d',
         foreground: '#e7e7e7',
@@ -114,7 +117,14 @@ function App() {
     fitAddonRef.current = fitAddon;
 
     const handleResize = () => {
-      fitAddon.fit();
+      // Calculate rows based on container height, keep 80 cols fixed
+      const container = terminalRef.current;
+      if (container) {
+        const charHeight = 17; // approximate line height for fontSize 14
+        const availableHeight = container.clientHeight - 12; // padding
+        const newRows = Math.max(10, Math.floor(availableHeight / charHeight));
+        term.resize(80, newRows);
+      }
       if (socketRef.current && selectedWorkerRef.current) {
         socketRef.current.emit('resize', {
           workerId: selectedWorkerRef.current,

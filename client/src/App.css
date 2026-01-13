@@ -1,11 +1,5 @@
-html, body, #root {
-  min-width: 600px;
-  overflow-x: auto;
-}
-
 .layout {
   height: 100vh;
-  min-width: 600px;
   display: flex;
   flex-direction: column;
   background: #050505;
@@ -87,8 +81,7 @@ html, body, #root {
   flex: 1;
   display: flex;
   min-height: 0;
-  min-width: 600px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .modal-overlay {
@@ -191,12 +184,16 @@ html, body, #root {
 }
 
 .terminal-wrapper {
-  background: #000;
-  width: 100%;
-  min-width: 580px;
-  height: 100%;
-  overflow: auto;
+  background: #0d0d0d;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 6px;
+}
+
+.terminal-wrapper .xterm {
+  min-width: max-content;
 }
 
 ::-webkit-scrollbar {
