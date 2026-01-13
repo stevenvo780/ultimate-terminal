@@ -42,11 +42,25 @@ const io = new Server(httpServer, {
 
 const authFilePath = path.resolve(process.cwd(), '.qodo', 'auth.json');
 const auditFilePath = path.resolve(process.cwd(), '.qodo', 'audit.log');
-const jwtSecret = process.env.NEXUS_JWT_SECRET || 'dev-secret-change-me';
-const workerSharedToken = process.env.WORKER_TOKEN || '';
+const rawJwtSecret = (process.env.NEXUS_JWT_SECRET || '').trim();
+const jwtSecret = resolveJwtSecret(rawJwtSecret);
+const workerSharedToken = (process.env.WORKER_TOKEN || '').trim();
+const setupToken = (process.env.NEXUS_SETUP_TOKEN || '').trim();
+const allowInsecureWorkers = /^(true|1|yes)$/i.test(process.env.ALLOW_UNAUTHENTICATED_WORKERS || '');
 const workers: Map<string, Worker> = new Map();
 const HEALTH_TIMEOUT_MS = Number(process.env.WORKER_HEALTH_TIMEOUT_MS || 15000);
 const HEALTH_CHECK_INTERVAL_MS = 5000;
+
+if (!setupToken) {
+  console.log('[Nexus] Setup is restricted to localhost. Set NEXUS_SETUP_TOKEN to allow remote setup.');
+}
+if (!workerSharedToken) {
+  if (allowInsecureWorkers) {
+    console.warn('[Nexus] WORKER_TOKEN is empty. Accepting unauthenticated workers because ALLOW_UNAUTHENTICATED_WORKERS=true.');
+  } else {
+    console.warn('[Nexus] WORKER_TOKEN is empty. Workers will be rejected unless ALLOW_UNAUTHENTICATED_WORKERS=true.');
+  }
+}
 
 setInterval(() => {
   let changed = false;
@@ -68,9 +82,38 @@ function hashPassword(password: string, salt?: string, iterations = 150000) {
   return { hash, salt: resolvedSalt, iterations };
 }
 
+function safeEqual(a: string, b: string) {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function verifyPassword(password: string, state: AuthState) {
   const { hash } = hashPassword(password, state.salt, state.iterations);
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(state.passwordHash, 'hex'));
+}
+
+function resolveJwtSecret(secret: string) {
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('NEXUS_JWT_SECRET must be set in production.');
+  }
+  const generated = crypto.randomBytes(48).toString('hex');
+  console.warn('[Nexus] NEXUS_JWT_SECRET is not set. Using a random secret for this run.');
+  return generated;
+}
+
+function isLoopbackRequest(req: Request) {
+  const ip = req.ip || req.socket.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+function isSetupAllowed(req: Request) {
+  if (!setupToken) return isLoopbackRequest(req);
+  const token = req.header('x-setup-token') || (req.body?.setupToken as string | undefined);
+  if (!token) return false;
+  return safeEqual(token, setupToken);
 }
 
 async function ensureAuthDir() {
@@ -152,6 +195,11 @@ app.get('/api/auth/status', async (_req, res) => {
 app.post('/api/auth/setup', async (req, res) => {
   const state = await loadAuthState();
   if (state) return res.status(400).json({ error: 'Already configured' });
+  if (!isSetupAllowed(req)) {
+    return res.status(403).json({
+      error: setupToken ? 'Invalid setup token' : 'Setup allowed only from localhost',
+    });
+  }
   const { password } = req.body as { password?: string };
   if (!password || password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
@@ -185,7 +233,11 @@ app.post('/api/auth/password', requireAuth, async (req, res) => {
 });
 
 io.use(async (socket, next) => {
-  const { token, type, workerToken } = (socket.handshake.auth || {}) as { token?: string; type?: string; workerToken?: string };
+  const { token, type, workerToken } = (socket.handshake.auth || {}) as {
+    token?: string;
+    type?: string;
+    workerToken?: string;
+  };
   try {
     if (type === 'client') {
       if (!token) return next(new Error('Missing token'));
@@ -194,8 +246,12 @@ io.use(async (socket, next) => {
       return next();
     }
     if (type === 'worker') {
-      if (workerSharedToken && workerSharedToken.length > 0) {
-        if (!workerToken || workerToken !== workerSharedToken) return next(new Error('Unauthorized worker'));
+      if (workerSharedToken) {
+        if (!workerToken || !safeEqual(workerToken, workerSharedToken)) {
+          return next(new Error('Unauthorized worker'));
+        }
+      } else if (!allowInsecureWorkers) {
+        return next(new Error('Worker auth required'));
       }
       socket.data.role = 'worker';
       return next();

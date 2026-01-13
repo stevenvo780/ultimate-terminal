@@ -293,6 +293,262 @@
   border-color: #2a5a9e;
 }
 
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #6b7c93;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: #1f1f1f;
+  margin: 12px 4px;
+}
+
+.worker-tools {
+  display: grid;
+  gap: 6px;
+}
+
+.worker-search,
+.worker-grouping {
+  background: #0c1117;
+  color: #e7e7e7;
+  border: 1px solid #243447;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.worker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.worker-group-title {
+  font-size: 0.75rem;
+  color: #9fb3c8;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 4px 0 2px 0;
+}
+
+.worker-item {
+  background: #0c1117;
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+  position: relative;
+  transition: all 150ms ease;
+}
+
+.worker-item:hover {
+  border-color: #2a3f5f;
+  background: #121820;
+}
+
+.worker-item.offline {
+  border-color: #3b2626;
+  background: #151013;
+}
+
+.worker-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.worker-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #e7e7e7;
+}
+
+.worker-meta {
+  font-size: 0.72rem;
+  color: #6b7c93;
+}
+
+.worker-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  font-size: 0.68rem;
+  color: #9fb3c8;
+  border: 1px solid #243447;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #0f1624;
+}
+
+.tag-chip.empty {
+  opacity: 0.6;
+}
+
+.tag-edit-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: transparent;
+  border: none;
+  color: #7da5d7;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.tag-edit-btn:hover {
+  color: #b7d7ff;
+}
+
+.command-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.command-target {
+  font-size: 0.8rem;
+  color: #9fb3c8;
+}
+
+.command-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.command-tabs button {
+  background: #0c1117;
+  color: #9fb3c8;
+  border: 1px solid #243447;
+  padding: 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 150ms ease;
+}
+
+.command-tabs button.active {
+  background: #1a2844;
+  color: #e7e7e7;
+  border-color: #2a5a9e;
+}
+
+.command-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mini-btn {
+  background: transparent;
+  border: 1px solid #243447;
+  color: #9fb3c8;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.mini-btn:hover:not(:disabled) {
+  background: #1a2332;
+  color: #fff;
+}
+
+.mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.command-item {
+  display: grid;
+  grid-template-columns: 22px 1fr 22px;
+  gap: 8px;
+  align-items: center;
+  background: #0c1117;
+  border: 1px solid #1f1f1f;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.command-run,
+.command-star,
+.command-remove {
+  background: transparent;
+  border: none;
+  color: #6b7c93;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.command-run:disabled,
+.command-star:disabled,
+.command-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.command-run:hover {
+  color: #78e08f;
+}
+
+.command-star:hover {
+  color: #f5d06b;
+}
+
+.command-remove:hover {
+  color: #ff6b6b;
+}
+
+.command-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: #d3dbe6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #e7e7e7;
+}
+
+.command-subtext {
+  font-size: 0.7rem;
+  color: #6b7c93;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .terminal-container {
   flex: 1;
   position: relative;

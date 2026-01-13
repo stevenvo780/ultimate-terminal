@@ -16,17 +16,46 @@ interface Worker {
 interface TerminalSession {
   id: string;
   workerId: string;
+  workerName: string;
+  workerKey: string;
   displayName: string;
   terminal: Terminal;
   fitAddon: FitAddon;
   containerRef: HTMLDivElement;
   resizeHandler: () => void;
+  createdAt: number;
+  lastActiveAt: number;
+}
+
+interface StoredSession {
+  id: string;
+  workerId?: string;
+  workerName: string;
+  workerKey: string;
+  displayName: string;
+  createdAt: number;
+  lastActiveAt: number;
+}
+
+interface CommandSnippet {
+  id: string;
+  label: string;
+  command: string;
 }
 
 // In production (served from nexus), use relative URL. In dev, use env or localhost.
 const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || (import.meta.env.PROD ? '' : 'http://localhost:3002');
 const AUTH_KEY = 'ut-token';
 const LAST_WORKER_KEY = 'ut-last-worker';
+const SESSION_STORE_KEY = 'ut-sessions-v1';
+const SESSION_OUTPUT_KEY = 'ut-session-output-v1';
+const ACTIVE_SESSION_KEY = 'ut-active-session';
+const WORKER_TAGS_KEY = 'ut-worker-tags';
+const WORKER_GROUPING_KEY = 'ut-worker-grouping';
+const COMMAND_HISTORY_KEY = 'ut-command-history';
+const COMMAND_SNIPPETS_KEY = 'ut-command-snippets';
+const MAX_OUTPUT_CHARS = 20000;
+const MAX_HISTORY_ITEMS = 60;
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 function App() {
@@ -39,6 +68,12 @@ function App() {
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [workerQuery, setWorkerQuery] = useState<string>('');
+  const [workerGrouping, setWorkerGrouping] = useState<'none' | 'tag'>('none');
+  const [workerTags, setWorkerTags] = useState<Record<string, string[]>>({});
+  const [commandTab, setCommandTab] = useState<'history' | 'snippets'>('history');
+  const [commandHistory, setCommandHistory] = useState<Record<string, string[]>>({});
+  const [commandSnippets, setCommandSnippets] = useState<Record<string, CommandSnippet[]>>({});
   
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -49,6 +84,193 @@ function App() {
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionRef = useRef<string | null>(null);
   const lastWorkerRef = useRef<string | null>(null);
+  const storedActiveSessionRef = useRef<string | null>(null);
+  const savedSessionsRef = useRef<StoredSession[]>([]);
+  const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
+  const sessionOutputRef = useRef<Record<string, string>>({});
+  const inputBuffersRef = useRef<Record<string, string>>({});
+  const escapeInputRef = useRef<Record<string, boolean>>({});
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipPersistRef = useRef<boolean>(true);
+  const hadSessionsRef = useRef<boolean>(false);
+
+  const normalizeWorkerKey = (name: string) => name.trim().toLowerCase();
+
+  const parseStored = <T,>(value: string | null, fallback: T): T => {
+    if (!value) return fallback;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const schedulePersistSessions = () => {
+    if (skipPersistRef.current) return;
+    if (persistTimerRef.current) return;
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      persistSessions();
+    }, 800);
+  };
+
+  const persistSessions = () => {
+    const snapshot = sessionsRef.current.map((session) => ({
+      id: session.id,
+      workerId: session.workerId,
+      workerName: session.workerName,
+      workerKey: session.workerKey,
+      displayName: session.displayName,
+      createdAt: session.createdAt,
+      lastActiveAt: session.lastActiveAt,
+    }));
+    savedSessionsRef.current = snapshot;
+    localStorage.setItem(SESSION_STORE_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(SESSION_OUTPUT_KEY, JSON.stringify(sessionOutputRef.current));
+    if (activeSessionRef.current) {
+      localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionRef.current);
+    } else {
+      localStorage.removeItem(ACTIVE_SESSION_KEY);
+    }
+  };
+
+  const resolveWorkerForSession = (session: { workerId: string; workerKey: string }, list: Worker[]) => {
+    const byId = list.find((worker) => worker.id === session.workerId);
+    if (byId) return byId;
+    const sameKey = list.filter((worker) => normalizeWorkerKey(worker.name) === session.workerKey);
+    if (sameKey.length === 0) return null;
+    return sameKey.find((worker) => worker.status !== 'offline') || sameKey[0];
+  };
+
+  const hydrateSavedSessions = (list: Worker[]) => {
+    if (!savedSessionsRef.current.length || !terminalContainerRef.current) return;
+    savedSessionsRef.current.forEach((saved) => {
+      if (hydratedSessionIdsRef.current.has(saved.id)) return;
+      const worker = resolveWorkerForSession(
+        { workerId: saved.workerId || '', workerKey: saved.workerKey },
+        list,
+      );
+      if (!worker) return;
+      const initialOutput = sessionOutputRef.current[saved.id];
+      const session = createNewSession(worker, {
+        sessionId: saved.id,
+        displayName: saved.displayName,
+        createdAt: saved.createdAt,
+        lastActiveAt: saved.lastActiveAt,
+        initialOutput,
+        focus: false,
+      });
+      if (session) {
+        hydratedSessionIdsRef.current.add(saved.id);
+        if (!activeSessionRef.current && storedActiveSessionRef.current === saved.id) {
+          setActiveSessionId(saved.id);
+        }
+      }
+    });
+
+    if (!activeSessionRef.current && !storedActiveSessionRef.current) {
+      const recent = savedSessionsRef.current
+        .filter((saved) => hydratedSessionIdsRef.current.has(saved.id))
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      if (recent) {
+        setActiveSessionId(recent.id);
+      }
+    }
+  };
+
+  const rebindSessionsToWorkers = (list: Worker[]) => {
+    setSessions((prev) =>
+      prev.map((session) => {
+        const resolved = resolveWorkerForSession(session, list);
+        if (!resolved) return session;
+        const nextKey = normalizeWorkerKey(resolved.name);
+        if (resolved.id === session.workerId && nextKey === session.workerKey) return session;
+        return {
+          ...session,
+          workerId: resolved.id,
+          workerName: resolved.name,
+          workerKey: nextKey,
+        };
+      }),
+    );
+  };
+
+  const addCommandToHistory = (workerKey: string, command: string) => {
+    const trimmed = command.trim();
+    if (!trimmed) return;
+    setCommandHistory((prev) => {
+      const existing = prev[workerKey] || [];
+      const next = [trimmed, ...existing.filter((item) => item !== trimmed)].slice(0, MAX_HISTORY_ITEMS);
+      return { ...prev, [workerKey]: next };
+    });
+  };
+
+  const trackInputForHistory = (sessionId: string, workerKey: string, data: string) => {
+    let buffer = inputBuffersRef.current[sessionId] || '';
+    let inEscape = escapeInputRef.current[sessionId] || false;
+    for (const ch of data) {
+      const code = ch.charCodeAt(0);
+      if (inEscape) {
+        if (code >= 64 && code <= 126) {
+          inEscape = false;
+        }
+        continue;
+      }
+      if (ch === '\x1b') {
+        inEscape = true;
+        continue;
+      }
+      if (ch === '\r' || ch === '\n') {
+        if (buffer.trim().length > 0) {
+          addCommandToHistory(workerKey, buffer);
+        }
+        buffer = '';
+        continue;
+      }
+      if (ch === '\x7f') {
+        buffer = buffer.slice(0, -1);
+        continue;
+      }
+      if (code < 32) {
+        continue;
+      }
+      buffer += ch;
+    }
+    inputBuffersRef.current[sessionId] = buffer;
+    escapeInputRef.current[sessionId] = inEscape;
+  };
+
+  const sendCommandToSession = (session: TerminalSession, command: string) => {
+    if (!socketRef.current) return;
+    const payload = command.endsWith('\n') ? command : `${command}\n`;
+    socketRef.current.emit('execute', {
+      workerId: session.workerId,
+      command: payload,
+    });
+  };
+
+  const sendCommandToActiveSession = (command: string) => {
+    const session = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+    if (!session) return;
+    if (offlineSessions.has(session.id)) return;
+    sendCommandToSession(session, command);
+    addCommandToHistory(session.workerKey, command);
+  };
+
+  const addSnippet = (workerKey: string, label: string, command: string) => {
+    const trimmedLabel = label.trim();
+    const trimmedCommand = command.trim();
+    if (!trimmedLabel || !trimmedCommand) return;
+    const snippet: CommandSnippet = {
+      id: `snip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      label: trimmedLabel,
+      command: trimmedCommand,
+    };
+    setCommandSnippets((prev) => {
+      const existing = prev[workerKey] || [];
+      return { ...prev, [workerKey]: [snippet, ...existing] };
+    });
+  };
 
   useEffect(() => {
     socketRef.current = socket;
@@ -56,6 +278,11 @@ function App() {
 
   useEffect(() => {
     sessionsRef.current = sessions;
+    if (skipPersistRef.current) {
+      skipPersistRef.current = false;
+      return;
+    }
+    schedulePersistSessions();
   }, [sessions]);
 
   useEffect(() => {
@@ -63,15 +290,65 @@ function App() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    const activeSession = sessions.find((s) => s.id === activeSessionId);
-    if (activeSession) {
-      localStorage.setItem(LAST_WORKER_KEY, activeSession.workerId);
-      lastWorkerRef.current = activeSession.workerId;
-    } else if (sessions.length === 0) {
+    if (activeSessionId) {
+      storedActiveSessionRef.current = activeSessionId;
+      localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+      const activeSession = sessionsRef.current.find((s) => s.id === activeSessionId);
+      if (activeSession) {
+        localStorage.setItem(LAST_WORKER_KEY, activeSession.workerKey);
+        lastWorkerRef.current = activeSession.workerKey;
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.id === activeSessionId
+              ? { ...session, lastActiveAt: Date.now() }
+              : session,
+          ),
+        );
+      }
+    } else {
+      storedActiveSessionRef.current = null;
+      localStorage.removeItem(ACTIVE_SESSION_KEY);
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (sessions.length > 0) {
+      hadSessionsRef.current = true;
+      return;
+    }
+    if (hadSessionsRef.current) {
       localStorage.removeItem(LAST_WORKER_KEY);
       lastWorkerRef.current = null;
+      hadSessionsRef.current = false;
     }
-  }, [activeSessionId, sessions]);
+  }, [sessions.length]);
+
+  useEffect(() => {
+    localStorage.setItem(WORKER_TAGS_KEY, JSON.stringify(workerTags));
+  }, [workerTags]);
+
+  useEffect(() => {
+    localStorage.setItem(WORKER_GROUPING_KEY, JSON.stringify(workerGrouping));
+  }, [workerGrouping]);
+
+  useEffect(() => {
+    localStorage.setItem(COMMAND_HISTORY_KEY, JSON.stringify(commandHistory));
+  }, [commandHistory]);
+
+  useEffect(() => {
+    localStorage.setItem(COMMAND_SNIPPETS_KEY, JSON.stringify(commandSnippets));
+  }, [commandSnippets]);
+
+  useEffect(() => {
+    const offline = new Set<string>();
+    sessions.forEach((session) => {
+      const resolved = resolveWorkerForSession(session, workers);
+      if (!resolved || resolved.status === 'offline') {
+        offline.add(session.id);
+      }
+    });
+    setOfflineSessions(offline);
+  }, [sessions, workers]);
 
   useEffect(() => {
     const saved = localStorage.getItem(AUTH_KEY);
@@ -79,6 +356,20 @@ function App() {
     if (!saved) setConnectionState('disconnected');
     const savedWorker = localStorage.getItem(LAST_WORKER_KEY);
     if (savedWorker) lastWorkerRef.current = savedWorker;
+    const savedSessions = parseStored<StoredSession[]>(localStorage.getItem(SESSION_STORE_KEY), []);
+    savedSessionsRef.current = savedSessions;
+    storedActiveSessionRef.current = localStorage.getItem(ACTIVE_SESSION_KEY);
+    sessionOutputRef.current = parseStored<Record<string, string>>(
+      localStorage.getItem(SESSION_OUTPUT_KEY),
+      {},
+    );
+    setWorkerTags(parseStored<Record<string, string[]>>(localStorage.getItem(WORKER_TAGS_KEY), {}));
+    const savedGrouping = parseStored<string>(localStorage.getItem(WORKER_GROUPING_KEY), 'none');
+    setWorkerGrouping(savedGrouping === 'tag' ? 'tag' : 'none');
+    setCommandHistory(parseStored<Record<string, string[]>>(localStorage.getItem(COMMAND_HISTORY_KEY), {}));
+    setCommandSnippets(
+      parseStored<Record<string, CommandSnippet[]>>(localStorage.getItem(COMMAND_SNIPPETS_KEY), {}),
+    );
     fetch(`${NEXUS_URL}/api/auth/status`)
       .then((res) => res.json())
       .then((data) => setNeedsSetup(Boolean(data.needsSetup)))
@@ -99,7 +390,7 @@ function App() {
     newSocket.on('connect', () => {
       setConnectionState('connected');
       newSocket.emit('register', { type: 'client' });
-      // Rehidrata la sesión activa al reconectar
+      // Rehidrata la sesion activa al reconectar
       setTimeout(() => resumeActiveSession(), 100);
     });
 
@@ -109,29 +400,20 @@ function App() {
 
     newSocket.on('worker-list', (list: Worker[]) => {
       setWorkers(list);
-      setOfflineSessions(() => {
-        const offline = new Set<string>();
-        sessionsRef.current.forEach((session) => {
-          const worker = list.find((w) => w.id === session.workerId);
-          if (!worker || worker.status === 'offline') {
-            offline.add(session.id);
-          }
-        });
-        return offline;
-      });
+      rebindSessionsToWorkers(list);
+      hydrateSavedSessions(list);
 
-      const preferredWorker = lastWorkerRef.current && list.some((w) => w.id === lastWorkerRef.current)
-        ? lastWorkerRef.current
+      const preferredWorker = lastWorkerRef.current
+        ? list.find((w) => normalizeWorkerKey(w.name) === lastWorkerRef.current)
         : null;
 
       const activeSession = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
-      const activeWorkerOnline = activeSession
-        ? list.some((w) => w.id === activeSession.workerId && w.status !== 'offline')
-        : false;
+      const resolvedActive = activeSession ? resolveWorkerForSession(activeSession, list) : null;
+      const activeWorkerOnline = resolvedActive ? resolvedActive.status !== 'offline' : false;
 
       if (!activeWorkerOnline) {
         if (preferredWorker) {
-          focusOrCreateSession(preferredWorker);
+          focusOrCreateSession(preferredWorker.id);
         } else if (list.length > 0) {
           const firstOnline = list.find((w) => w.status !== 'offline') || list[0];
           focusOrCreateSession(firstOnline.id);
@@ -146,11 +428,30 @@ function App() {
       const workerSessions = sessionsRef.current.filter(s => s.workerId === data.workerId);
       workerSessions.forEach(session => {
         session.terminal.write(data.data);
+        const current = sessionOutputRef.current[session.id] || '';
+        const next = `${current}${data.data}`.slice(-MAX_OUTPUT_CHARS);
+        sessionOutputRef.current[session.id] = next;
       });
+      if (workerSessions.length > 0) {
+        schedulePersistSessions();
+      }
     });
 
     newSocket.on('connect_error', (err) => {
-      setAuthError(err.message);
+      const message = err?.message || 'Connection error';
+      const normalized = message.toLowerCase();
+      const isAuthIssue = [
+        'invalid token',
+        'missing token',
+        'jwt expired',
+        'invalid signature',
+        'unauthorized',
+      ].some((needle) => normalized.includes(needle));
+      if (isAuthIssue) {
+        clearAuth('Sesion expirada o invalida. Inicia sesion de nuevo.');
+        return;
+      }
+      setAuthError(message);
       setConnectionState('reconnecting');
     });
 
@@ -159,13 +460,83 @@ function App() {
     };
   }, [token]);
 
-  const createNewSession = (workerId: string) => {
-    const worker = workers.find(w => w.id === workerId);
-    if (!worker || !terminalContainerRef.current) return;
-    localStorage.setItem(LAST_WORKER_KEY, workerId);
-    lastWorkerRef.current = workerId;
+  const disposeSession = (session: TerminalSession) => {
+    window.removeEventListener('resize', session.resizeHandler);
+    session.terminal.dispose();
+    session.containerRef.remove();
+  };
 
-    const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  const clearAllSessions = (options?: { preserveStorage?: boolean; resetHydration?: boolean }) => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    sessionsRef.current.forEach(disposeSession);
+    sessionsRef.current = [];
+    activeSessionRef.current = null;
+    inputBuffersRef.current = {};
+    escapeInputRef.current = {};
+    setSessions([]);
+    setActiveSessionId(null);
+    setOfflineSessions(new Set());
+    if (options?.resetHydration) {
+      hydratedSessionIdsRef.current = new Set();
+    }
+    if (!options?.preserveStorage) {
+      sessionOutputRef.current = {};
+      schedulePersistSessions();
+    }
+  };
+
+  const clearAuth = (message?: string) => {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(LAST_WORKER_KEY);
+    lastWorkerRef.current = null;
+    setToken(null);
+    setWorkers([]);
+    skipPersistRef.current = true;
+    clearAllSessions({ preserveStorage: true, resetHydration: true });
+    setShowSettings(false);
+    setConnectionState('disconnected');
+    setAuthError(message || null);
+    socketRef.current?.disconnect();
+    setSocket(null);
+  };
+
+  const fitAndResizeSession = (session: TerminalSession) => {
+    const container = session.containerRef;
+    const isVisible = container.offsetParent !== null && container.clientWidth > 0 && container.clientHeight > 0;
+    if (!isVisible) return;
+    session.fitAddon.fit();
+    if (socketRef.current && session.terminal.cols > 0 && session.terminal.rows > 0) {
+      socketRef.current.emit('resize', {
+        workerId: session.workerId,
+        cols: session.terminal.cols,
+        rows: session.terminal.rows,
+      });
+    }
+  };
+
+  const createNewSession = (
+    worker: Worker,
+    options?: {
+      sessionId?: string;
+      displayName?: string;
+      createdAt?: number;
+      lastActiveAt?: number;
+      initialOutput?: string;
+      focus?: boolean;
+    },
+  ) => {
+    if (!terminalContainerRef.current) return;
+    const workerKey = normalizeWorkerKey(worker.name);
+    localStorage.setItem(LAST_WORKER_KEY, workerKey);
+    lastWorkerRef.current = workerKey;
+
+    const sessionId = options?.sessionId || `session-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    const displayName = options?.displayName || worker.name;
+    const createdAt = options?.createdAt || Date.now();
+    const lastActiveAt = options?.lastActiveAt || Date.now();
     
     // Create terminal container
     const container = document.createElement('div');
@@ -196,9 +567,10 @@ function App() {
 
     // Handle terminal input
     term.onData((data) => {
+      trackInputForHistory(sessionId, workerKey, data);
       if (socketRef.current) {
         socketRef.current.emit('execute', {
-          workerId: workerId,
+          workerId: worker.id,
           command: data,
         });
       }
@@ -206,14 +578,12 @@ function App() {
 
     // Handle resize
     const handleResize = () => {
-      const charHeight = 17;
-      const availableHeight = container.clientHeight - 12;
-      const newRows = Math.max(10, Math.floor(availableHeight / charHeight));
-      term.resize(80, newRows);
-      
-      if (socketRef.current) {
+      const isVisible = container.offsetParent !== null && container.clientWidth > 0 && container.clientHeight > 0;
+      if (!isVisible) return;
+      fitAddon.fit();
+      if (socketRef.current && term.cols > 0 && term.rows > 0) {
         socketRef.current.emit('resize', {
-          workerId: workerId,
+          workerId: worker.id,
           cols: term.cols,
           rows: term.rows,
         });
@@ -224,23 +594,34 @@ function App() {
 
     const session: TerminalSession = {
       id: sessionId,
-      workerId: workerId,
-      displayName: worker.name,
+      workerId: worker.id,
+      workerName: worker.name,
+      workerKey,
+      displayName,
       terminal: term,
       fitAddon: fitAddon,
       containerRef: container,
       resizeHandler: handleResize,
+      createdAt,
+      lastActiveAt,
     };
+    if (options?.initialOutput) {
+      const output = options.initialOutput.slice(-MAX_OUTPUT_CHARS);
+      term.write(output);
+      sessionOutputRef.current[sessionId] = output;
+    }
 
     setSessions(prev => [...prev, session]);
-    setActiveSessionId(sessionId);
+    if (options?.focus !== false) {
+      setActiveSessionId(sessionId);
+    }
 
     // Initial resize and trigger prompt
     setTimeout(() => {
       handleResize();
       if (socketRef.current) {
         socketRef.current.emit('execute', {
-          workerId: workerId,
+          workerId: worker.id,
           command: '\n',
         });
       }
@@ -254,12 +635,11 @@ function App() {
       const session = prevSessions.find(s => s.id === sessionId);
       if (!session) return prevSessions;
 
-      // Clean up resize event listener
-      window.removeEventListener('resize', session.resizeHandler);
-
-      // Dispose terminal
-      session.terminal.dispose();
-      session.containerRef.remove();
+      disposeSession(session);
+      delete sessionOutputRef.current[session.id];
+      delete inputBuffersRef.current[session.id];
+      delete escapeInputRef.current[session.id];
+      schedulePersistSessions();
 
       // Filter out the closed session
       const newSessions = prevSessions.filter(s => s.id !== sessionId);
@@ -284,7 +664,7 @@ function App() {
   const renameSession = (sessionId: string) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
     if (!session) return;
-    const newName = window.prompt('Nuevo nombre para la sesión', session.displayName);
+    const newName = window.prompt('Nuevo nombre para la sesion', session.displayName);
     if (newName && newName.trim().length > 0) {
       setSessions((prev) =>
         prev.map((s) => (s.id === sessionId ? { ...s, displayName: newName.trim() } : s)),
@@ -293,59 +673,134 @@ function App() {
   };
 
   const focusOrCreateSession = (workerId: string) => {
-    localStorage.setItem(LAST_WORKER_KEY, workerId);
-    lastWorkerRef.current = workerId;
-    const existing = sessionsRef.current.find((session) => session.workerId === workerId);
+    const worker = workers.find((w) => w.id === workerId);
+    if (!worker) return;
+    const workerKey = normalizeWorkerKey(worker.name);
+    localStorage.setItem(LAST_WORKER_KEY, workerKey);
+    lastWorkerRef.current = workerKey;
+    const existing = sessionsRef.current.find((session) => session.workerKey === workerKey);
     if (existing) {
       setActiveSessionId(existing.id);
       return existing;
     }
-    return createNewSession(workerId);
+    return createNewSession(worker);
   };
 
   const resumeActiveSession = () => {
     const session = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
     if (!session || !socketRef.current) return;
-    session.fitAddon.fit();
-    socketRef.current.emit('resize', {
-      workerId: session.workerId,
-      cols: session.terminal.cols,
-      rows: session.terminal.rows,
-    });
+    fitAndResizeSession(session);
     socketRef.current.emit('execute', {
       workerId: session.workerId,
       command: '\n',
     });
   };
 
-  const activeWorkerId = sessions.find((session) => session.id === activeSessionId)?.workerId || '';
+  const activeSession = sessions.find((session) => session.id === activeSessionId) || null;
+  const activeWorkerId = activeSession?.workerId || '';
+  const activeWorkerKey = activeSession?.workerKey || '';
+  const activeWorkerName = activeSession?.workerName || '';
+  const activeHistory = activeWorkerKey ? commandHistory[activeWorkerKey] || [] : [];
+  const activeSnippets = activeWorkerKey ? commandSnippets[activeWorkerKey] || [] : [];
+  const activeSessionOffline = activeSessionId ? offlineSessions.has(activeSessionId) : false;
+
+  const parseTagsInput = (value: string) =>
+    value
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+  const editWorkerTags = (worker: Worker) => {
+    const workerKey = normalizeWorkerKey(worker.name);
+    const current = (workerTags[workerKey] || []).join(', ');
+    const next = window.prompt(`Tags para ${worker.name} (separadas por coma)`, current);
+    if (next === null) return;
+    const parsed = parseTagsInput(next);
+    setWorkerTags((prev) => ({ ...prev, [workerKey]: parsed }));
+  };
+
+  const clearActiveHistory = () => {
+    if (!activeWorkerKey) return;
+    setCommandHistory((prev) => ({ ...prev, [activeWorkerKey]: [] }));
+  };
+
+  const addSnippetForActive = (command?: string) => {
+    if (!activeWorkerKey) return;
+    const defaultCommand = command || '';
+    const label = window.prompt('Nombre del snippet', defaultCommand.slice(0, 24) || 'Snippet');
+    if (label === null) return;
+    const cmd = command || window.prompt('Comando', defaultCommand);
+    if (cmd === null) return;
+    addSnippet(activeWorkerKey, label, cmd);
+  };
+
+  const removeSnippet = (snippetId: string) => {
+    if (!activeWorkerKey) return;
+    setCommandSnippets((prev) => {
+      const existing = prev[activeWorkerKey] || [];
+      return { ...prev, [activeWorkerKey]: existing.filter((item) => item.id !== snippetId) };
+    });
+  };
+
+  const workerSearch = workerQuery.trim().toLowerCase();
+  const filteredWorkers = workers.filter((worker) => {
+    if (!workerSearch) return true;
+    const workerKey = normalizeWorkerKey(worker.name);
+    const tags = workerTags[workerKey] || [];
+    return (
+      worker.name.toLowerCase().includes(workerSearch) ||
+      tags.some((tag) => tag.toLowerCase().includes(workerSearch))
+    );
+  });
+
+  const groupedWorkers =
+    workerGrouping === 'tag'
+      ? filteredWorkers.reduce((acc, worker) => {
+          const workerKey = normalizeWorkerKey(worker.name);
+          const tags = workerTags[workerKey] || [];
+          const groupLabel = tags[0] || 'Sin etiquetas';
+          acc[groupLabel] = acc[groupLabel] || [];
+          acc[groupLabel].push(worker);
+          return acc;
+        }, {} as Record<string, Worker[]>)
+      : { Todos: filteredWorkers };
+
+  const groupedWorkerEntries = Object.entries(groupedWorkers).sort(([a], [b]) => {
+    if (a === 'Sin etiquetas') return 1;
+    if (b === 'Sin etiquetas') return -1;
+    return a.localeCompare(b);
+  });
 
   useEffect(() => {
     // Show/hide terminal containers based on active session
     sessions.forEach(session => {
       session.containerRef.style.display = session.id === activeSessionId ? 'block' : 'none';
       if (session.id === activeSessionId) {
-        setTimeout(() => session.fitAddon.fit(), 50);
+        setTimeout(() => fitAndResizeSession(session), 50);
       }
     });
   }, [activeSessionId, sessions]);
 
-  const handleAuth = async (endpoint: 'setup' | 'login', password: string) => {
+  const handleAuth = async (endpoint: 'setup' | 'login', password: string, setupToken?: string) => {
     setBusy(true);
     setAuthError(null);
     try {
+      const payload: { password: string; setupToken?: string } = { password };
+      if (endpoint === 'setup' && setupToken) {
+        payload.setupToken = setupToken;
+      }
       const res = await fetch(`${NEXUS_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Auth failed');
       const data = await res.json();
       localStorage.setItem(AUTH_KEY, data.token);
       setToken(data.token);
       setNeedsSetup(false);
-    } catch (err: any) {
-      setAuthError(err.message);
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : 'Error desconocido');
     } finally {
       setBusy(false);
     }
@@ -362,23 +817,15 @@ function App() {
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Password change failed');
-    } catch (err: any) {
-      setAuthError(err.message);
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : 'Error desconocido');
     } finally {
       setBusy(false);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem(LAST_WORKER_KEY);
-    setToken(null);
-    setWorkers([]);
-    setSessions([]);
-    setActiveSessionId(null);
-    socket?.disconnect();
-    setSocket(null);
-    setConnectionState('disconnected');
+    clearAuth();
   };
 
   const Sidebar = () => (
@@ -392,47 +839,221 @@ function App() {
       {!sidebarCollapsed && (
         <>
           <div className="sidebar-content">
-            {sessions.map(session => (
-              <div
-                key={session.id}
-                className={`session-item ${activeSessionId === session.id ? 'active' : ''} ${offlineSessions.has(session.id) ? 'offline' : ''}`}
-                onClick={() => switchSession(session.id)}
-              >
-                <div className="session-info">
-                  <div className="session-name">{session.displayName}</div>
-                  {offlineSessions.has(session.id) && <span className="badge-offline">Offline</span>}
-                  <div className="session-id">{session.id.substring(0, 12)}...</div>
+            <div className="sidebar-section">
+              <div className="section-title">Sesiones</div>
+              {sessions.map(session => (
+                <div
+                  key={session.id}
+                  className={`session-item ${activeSessionId === session.id ? 'active' : ''} ${offlineSessions.has(session.id) ? 'offline' : ''}`}
+                  onClick={() => switchSession(session.id)}
+                >
+                  <div className="session-info">
+                    <div className="session-name">{session.displayName}</div>
+                    {offlineSessions.has(session.id) && <span className="badge-offline">Offline</span>}
+                    <div className="session-id">{session.id.substring(0, 12)}...</div>
+                  </div>
+                  <button
+                    className="rename-session-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      renameSession(session.id);
+                    }}
+                    title="Renombrar sesion"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    className="close-session-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeSession(session.id);
+                    }}
+                    title="Cerrar sesion"
+                  >
+                    ✕
+                  </button>
                 </div>
-                <button
-                  className="rename-session-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    renameSession(session.id);
-                  }}
-                  title="Renombrar sesión"
+              ))}
+              {sessions.length === 0 && (
+                <div className="empty-sessions">
+                  No hay sesiones activas
+                </div>
+              )}
+            </div>
+
+            <div className="sidebar-divider" />
+
+            <div className="sidebar-section">
+              <div className="section-title">Workers</div>
+              <div className="worker-tools">
+                <input
+                  className="worker-search"
+                  placeholder="Buscar por nombre o tag..."
+                  value={workerQuery}
+                  onChange={(e) => setWorkerQuery(e.target.value)}
+                />
+                <select
+                  className="worker-grouping"
+                  value={workerGrouping}
+                  onChange={(e) => setWorkerGrouping(e.target.value as 'none' | 'tag')}
                 >
-                  ✎
+                  <option value="none">Sin agrupar</option>
+                  <option value="tag">Agrupar por tag</option>
+                </select>
+              </div>
+              {filteredWorkers.length === 0 && (
+                <div className="empty-sessions">
+                  No hay workers
+                </div>
+              )}
+              {filteredWorkers.length > 0 && groupedWorkerEntries.map(([groupLabel, groupWorkers]) => (
+                <div key={groupLabel} className="worker-group">
+                  {workerGrouping === 'tag' && <div className="worker-group-title">{groupLabel}</div>}
+                  {groupWorkers.map((worker) => {
+                    const workerKey = normalizeWorkerKey(worker.name);
+                    const tags = workerTags[workerKey] || [];
+                    return (
+                      <div
+                        key={worker.id}
+                        className={`worker-item ${worker.status === 'offline' ? 'offline' : ''}`}
+                        onClick={() => focusOrCreateSession(worker.id)}
+                      >
+                        <div className="worker-main">
+                          <div className="worker-name">{worker.name}</div>
+                          <div className="worker-meta">{worker.status === 'offline' ? 'Offline' : 'Online'}</div>
+                        </div>
+                        <div className="worker-tags">
+                          {tags.length > 0
+                            ? tags.map((tag) => (
+                                <span key={`${worker.id}-${tag}`} className="tag-chip">
+                                  {tag}
+                                </span>
+                              ))
+                            : <span className="tag-chip empty">Sin tags</span>}
+                        </div>
+                        <button
+                          className="tag-edit-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            editWorkerTags(worker);
+                          }}
+                          title="Editar tags"
+                        >
+                          🏷
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            <div className="sidebar-divider" />
+
+            <div className="sidebar-section">
+              <div className="section-title">Comandos</div>
+              <div className="command-header">
+                <span className="command-target">
+                  {activeWorkerName || 'Sin sesion activa'}
+                </span>
+                {activeSessionOffline && <span className="badge-offline">Offline</span>}
+              </div>
+              <div className="command-tabs">
+                <button
+                  className={commandTab === 'history' ? 'active' : ''}
+                  onClick={() => setCommandTab('history')}
+                >
+                  Historial
                 </button>
                 <button
-                  className="close-session-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeSession(session.id);
-                  }}
-                  title="Cerrar sesión"
+                  className={commandTab === 'snippets' ? 'active' : ''}
+                  onClick={() => setCommandTab('snippets')}
                 >
-                  ✕
+                  Snippets
                 </button>
               </div>
-            ))}
-            {sessions.length === 0 && (
-              <div className="empty-sessions">
-                No hay sesiones activas
-              </div>
-            )}
+              {!activeSession && (
+                <div className="empty-sessions">
+                  Selecciona una sesion para ver comandos
+                </div>
+              )}
+              {activeSession && commandTab === 'history' && (
+                <>
+                  <div className="command-actions">
+                    <button className="mini-btn" onClick={clearActiveHistory} disabled={!activeHistory.length}>
+                      Limpiar
+                    </button>
+                  </div>
+                  <div className="command-list">
+                    {activeHistory.length === 0 && (
+                      <div className="empty-sessions">Sin historial</div>
+                    )}
+                    {activeHistory.map((cmd, index) => (
+                      <div key={`${cmd}-${index}`} className="command-item">
+                        <button
+                          className="command-run"
+                          onClick={() => sendCommandToActiveSession(cmd)}
+                          disabled={activeSessionOffline}
+                          title="Ejecutar"
+                        >
+                          ▶
+                        </button>
+                        <div className="command-text" title={cmd}>{cmd}</div>
+                        <button
+                          className="command-star"
+                          onClick={() => addSnippetForActive(cmd)}
+                          disabled={activeSessionOffline}
+                          title="Guardar como snippet"
+                        >
+                          ☆
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {activeSession && commandTab === 'snippets' && (
+                <>
+                  <div className="command-actions">
+                    <button className="mini-btn" onClick={() => addSnippetForActive()} disabled={activeSessionOffline}>
+                      Agregar
+                    </button>
+                  </div>
+                  <div className="command-list">
+                    {activeSnippets.length === 0 && (
+                      <div className="empty-sessions">Sin snippets</div>
+                    )}
+                    {activeSnippets.map((snippet) => (
+                      <div key={snippet.id} className="command-item">
+                        <button
+                          className="command-run"
+                          onClick={() => sendCommandToActiveSession(snippet.command)}
+                          disabled={activeSessionOffline}
+                          title="Ejecutar"
+                        >
+                          ▶
+                        </button>
+                        <div className="command-text">
+                          <div className="command-title">{snippet.label}</div>
+                          <div className="command-subtext">{snippet.command}</div>
+                        </div>
+                        <button
+                          className="command-remove"
+                          onClick={() => removeSnippet(snippet.id)}
+                          disabled={activeSessionOffline}
+                          title="Eliminar"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
           <div className="sidebar-footer">
-            <label>Nueva sesión en:</label>
+            <label>Nueva sesion en:</label>
             <select
               onChange={(e) => {
                 if (e.target.value) {
@@ -479,13 +1100,13 @@ function App() {
         </select>
       </div>
       <div className="topbar-stats">
-        <span>{sessions.length} sesión{sessions.length !== 1 ? 'es' : ''}</span>
+        <span>{sessions.length} sesion{sessions.length !== 1 ? 'es' : ''}</span>
         <span>•</span>
         <span>{workers.length} worker{workers.length !== 1 ? 's' : ''}</span>
       </div>
       <div className="topbar-right">
         {activeSessionId && (
-          <button className="resume-btn" onClick={resumeActiveSession} title="Reanudar sesión activa">
+          <button className="resume-btn" onClick={resumeActiveSession} title="Reanudar sesion activa">
             Reanudar
           </button>
         )}
@@ -509,6 +1130,7 @@ function App() {
   const AuthForm = () => {
     const [password, setPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
+    const [setupToken, setSetupToken] = useState('');
 
     if (token) {
       return (
@@ -539,7 +1161,16 @@ function App() {
           <label>{needsSetup ? 'Define la contrasena inicial' : 'Contrasena'}</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
-        <button disabled={busy || password.length < 8} onClick={() => handleAuth(needsSetup ? 'setup' : 'login', password)}>
+        {needsSetup && (
+          <div className="auth-row">
+            <label>Setup token (si aplica)</label>
+            <input type="password" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} />
+          </div>
+        )}
+        <button
+          disabled={busy || password.length < 8}
+          onClick={() => handleAuth(needsSetup ? 'setup' : 'login', password, setupToken)}
+        >
           {needsSetup ? 'Configurar y entrar' : 'Entrar'}
         </button>
         {authError && <p className="error">{authError}</p>}
@@ -574,7 +1205,7 @@ function App() {
           {sessions.length === 0 && token && (
             <div className="empty-state">
               <h2>No hay sesiones activas</h2>
-              <p>Crea una nueva sesión desde el selector superior o el sidebar</p>
+              <p>Crea una nueva sesion desde el selector superior o el sidebar</p>
               {workers.length === 0 && <p className="muted">No hay workers conectados en este momento.</p>}
             </div>
           )}
