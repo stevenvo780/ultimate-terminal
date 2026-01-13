@@ -18,8 +18,17 @@ console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 
 // Connection state management
 let socket: Socket;
-// Map of clientId -> PTY instance
+// Map of clientId:sessionId -> PTY instance
 const clientShells = new Map<string, pty.IPty>();
+const DEFAULT_SESSION_ID = 'default';
+
+const normalizeSessionId = (sessionId?: string) => {
+  const trimmed = sessionId?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+};
+
+const buildShellKey = (clientId: string, sessionId?: string) =>
+  `${clientId}:${normalizeSessionId(sessionId) ?? DEFAULT_SESSION_ID}`;
 let retryDelay = 1000;
 const MAX_RETRY_DELAY = 30000;
 let heartbeatInterval: NodeJS.Timeout | null = null;
@@ -56,12 +65,12 @@ function connect() {
     scheduleReconnect();
   });
 
-  socket.on('execute', (data: { clientId: string, command: string }) => {
-    // Get or create PTY for this client
-    let shell = clientShells.get(data.clientId);
+  socket.on('execute', (data: { clientId: string; sessionId?: string; command: string }) => {
+    const shellKey = buildShellKey(data.clientId, data.sessionId);
+    let shell = clientShells.get(shellKey);
     if (!shell) {
-      shell = createShellForClient(data.clientId);
-      clientShells.set(data.clientId, shell);
+      shell = createShellForClient(shellKey, data.clientId, data.sessionId);
+      clientShells.set(shellKey, shell);
     }
     if (shell) {
       shell.write(data.command);
@@ -69,12 +78,12 @@ function connect() {
   });
   
   // Handle terminal resize events from client
-  socket.on('resize', (data: { clientId: string, cols: number, rows: number }) => {
-    let shell = clientShells.get(data.clientId);
+  socket.on('resize', (data: { clientId: string; sessionId?: string; cols: number; rows: number }) => {
+    const shellKey = buildShellKey(data.clientId, data.sessionId);
+    let shell = clientShells.get(shellKey);
     if (!shell) {
-      // Create PTY with the specified dimensions if it doesn't exist yet
-      shell = createShellForClient(data.clientId, data.cols, data.rows);
-      clientShells.set(data.clientId, shell);
+      shell = createShellForClient(shellKey, data.clientId, data.sessionId, data.cols, data.rows);
+      clientShells.set(shellKey, shell);
     } else {
       try {
         shell.resize(data.cols, data.rows);
@@ -86,16 +95,17 @@ function connect() {
 
   // Handle client disconnection
   socket.on('client-disconnect', (data: { clientId: string }) => {
-    const shell = clientShells.get(data.clientId);
-    if (shell) {
+    const prefix = `${data.clientId}:`;
+    clientShells.forEach((shell, key) => {
+      if (!key.startsWith(prefix)) return;
       console.log(`[Worker] Cleaning up PTY for client ${data.clientId}`);
       try {
         shell.kill();
       } catch (e) {
         // Ignore errors during cleanup
       }
-      clientShells.delete(data.clientId);
-    }
+      clientShells.delete(key);
+    });
   });
 }
 
@@ -111,10 +121,18 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
-function createShellForClient(clientId: string, cols: number = 80, rows: number = 30): pty.IPty {
+function createShellForClient(
+  shellKey: string,
+  clientId: string,
+  sessionId?: string,
+  cols: number = 80,
+  rows: number = 30,
+): pty.IPty {
   const shellCmd = process.env.SHELL || 'bash';
   
-  console.log(`[Worker] Spawning PTY for client ${clientId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  const sessionLabel = normalizedSessionId ? `/${normalizedSessionId}` : '';
+  console.log(`[Worker] Spawning PTY for client ${clientId}${sessionLabel} (${shellCmd}) with dimensions ${cols}x${rows}...`);
 
   const baseEnv = {
     PATH: process.env.PATH,
@@ -136,14 +154,15 @@ function createShellForClient(clientId: string, cols: number = 80, rows: number 
     if (socket && socket.connected) {
       socket.emit('output', {
         clientId,
-        output: data
+        sessionId: normalizedSessionId,
+        output: data,
       });
     }
   });
 
   shell.onExit(({ exitCode, signal }) => {
     console.log(`[Worker] Shell for client ${clientId} exited (Code: ${exitCode}, Signal: ${signal}).`);
-    clientShells.delete(clientId);
+    clientShells.delete(shellKey);
   });
 
   return shell;

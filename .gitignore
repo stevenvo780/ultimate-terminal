@@ -74,3 +74,6 @@ deploy/nexus-linux
 worker/bin/
 nexus/bin/
 *.node
+
+# Playwright MCP
+.playwright-mcp/

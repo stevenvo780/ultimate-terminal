@@ -285,7 +285,7 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on('execute', (data: { workerId: string; command: string }) => {
+  socket.on('execute', (data: { workerId: string; sessionId?: string; command: string }) => {
     if (socket.data.role !== 'client') return;
     if (!data.command || data.command.length > 4096) return;
     const worker = workers.get(data.workerId);
@@ -302,6 +302,7 @@ io.on('connection', (socket: Socket) => {
       }
       io.to(worker.socketId).emit('execute', {
         clientId: socket.id,
+        sessionId: data.sessionId,
         command: data.command,
       });
     }
@@ -316,28 +317,31 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on('resize', (data: { workerId: string; cols: number; rows: number }) => {
+  socket.on('resize', (data: { workerId: string; sessionId?: string; cols: number; rows: number }) => {
     if (socket.data.role !== 'client') return;
     const worker = workers.get(data.workerId);
     if (worker) {
       io.to(worker.socketId).emit('resize', { 
         clientId: socket.id,
+        sessionId: data.sessionId,
         cols: data.cols, 
         rows: data.rows 
       });
     }
   });
 
-  socket.on('output', (data: { clientId?: string; output: string }) => {
+  socket.on('output', (data: { clientId?: string; sessionId?: string; output: string }) => {
     if (socket.data.role !== 'worker') return;
     if (data.clientId) {
       io.to(data.clientId).emit('output', {
         workerId: socket.id,
+        sessionId: data.sessionId,
         data: data.output,
       });
     } else {
       io.emit('output', {
         workerId: socket.id,
+        sessionId: data.sessionId,
         data: data.output,
       });
     }

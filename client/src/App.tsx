@@ -245,6 +245,7 @@ function App() {
     const payload = command.endsWith('\n') ? command : `${command}\n`;
     socketRef.current.emit('execute', {
       workerId: session.workerId,
+      sessionId: session.id,
       command: payload,
     });
   };
@@ -423,16 +424,17 @@ function App() {
       }
     });
 
-    newSocket.on('output', (data: { workerId: string; data: string }) => {
-      // Find all sessions for this worker and write output to them
-      const workerSessions = sessionsRef.current.filter(s => s.workerId === data.workerId);
-      workerSessions.forEach(session => {
+    newSocket.on('output', (data: { workerId: string; sessionId?: string; data: string }) => {
+      const targetSessions = data.sessionId
+        ? sessionsRef.current.filter((session) => session.id === data.sessionId)
+        : sessionsRef.current.filter((session) => session.workerId === data.workerId);
+      targetSessions.forEach((session) => {
         session.terminal.write(data.data);
         const current = sessionOutputRef.current[session.id] || '';
         const next = `${current}${data.data}`.slice(-MAX_OUTPUT_CHARS);
         sessionOutputRef.current[session.id] = next;
       });
-      if (workerSessions.length > 0) {
+      if (targetSessions.length > 0) {
         schedulePersistSessions();
       }
     });
@@ -511,6 +513,7 @@ function App() {
     if (socketRef.current && session.terminal.cols > 0 && session.terminal.rows > 0) {
       socketRef.current.emit('resize', {
         workerId: session.workerId,
+        sessionId: session.id,
         cols: session.terminal.cols,
         rows: session.terminal.rows,
       });
@@ -571,6 +574,7 @@ function App() {
       if (socketRef.current) {
         socketRef.current.emit('execute', {
           workerId: worker.id,
+          sessionId,
           command: data,
         });
       }
@@ -584,6 +588,7 @@ function App() {
       if (socketRef.current && term.cols > 0 && term.rows > 0) {
         socketRef.current.emit('resize', {
           workerId: worker.id,
+          sessionId,
           cols: term.cols,
           rows: term.rows,
         });
@@ -622,6 +627,7 @@ function App() {
       if (socketRef.current) {
         socketRef.current.emit('execute', {
           workerId: worker.id,
+          sessionId,
           command: '\n',
         });
       }
@@ -692,6 +698,7 @@ function App() {
     fitAndResizeSession(session);
     socketRef.current.emit('execute', {
       workerId: session.workerId,
+      sessionId: session.id,
       command: '\n',
     });
   };
