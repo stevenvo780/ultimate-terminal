@@ -18,17 +18,14 @@ console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 
 // Connection state management
 let socket: Socket;
-// Map of clientId:sessionId -> PTY instance
-const clientShells = new Map<string, pty.IPty>();
-const DEFAULT_SESSION_ID = 'default';
+// Map of sessionId -> PTY instance (persistent sessions, not tied to clientId)
+const sessionShells = new Map<string, pty.IPty>();
 
 const normalizeSessionId = (sessionId?: string) => {
   const trimmed = sessionId?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 };
 
-const buildShellKey = (clientId: string, sessionId?: string) =>
-  `${clientId}:${normalizeSessionId(sessionId) ?? DEFAULT_SESSION_ID}`;
 let retryDelay = 1000;
 const MAX_RETRY_DELAY = 30000;
 let heartbeatInterval: NodeJS.Timeout | null = null;
@@ -66,11 +63,15 @@ function connect() {
   });
 
   socket.on('execute', (data: { clientId: string; sessionId?: string; command: string }) => {
-    const shellKey = buildShellKey(data.clientId, data.sessionId);
-    let shell = clientShells.get(shellKey);
+    const sessionId = normalizeSessionId(data.sessionId);
+    if (!sessionId) {
+      console.log('[Worker] Ignoring execute without sessionId');
+      return;
+    }
+    let shell = sessionShells.get(sessionId);
     if (!shell) {
-      shell = createShellForClient(shellKey, data.clientId, data.sessionId);
-      clientShells.set(shellKey, shell);
+      shell = createShellForSession(sessionId);
+      sessionShells.set(sessionId, shell);
     }
     if (shell) {
       shell.write(data.command);
@@ -79,11 +80,12 @@ function connect() {
   
   // Handle terminal resize events from client
   socket.on('resize', (data: { clientId: string; sessionId?: string; cols: number; rows: number }) => {
-    const shellKey = buildShellKey(data.clientId, data.sessionId);
-    let shell = clientShells.get(shellKey);
+    const sessionId = normalizeSessionId(data.sessionId);
+    if (!sessionId) return;
+    let shell = sessionShells.get(sessionId);
     if (!shell) {
-      shell = createShellForClient(shellKey, data.clientId, data.sessionId, data.cols, data.rows);
-      clientShells.set(shellKey, shell);
+      shell = createShellForSession(sessionId, data.cols, data.rows);
+      sessionShells.set(sessionId, shell);
     } else {
       try {
         shell.resize(data.cols, data.rows);
@@ -93,19 +95,26 @@ function connect() {
     }
   });
 
-  // Handle client disconnection
-  socket.on('client-disconnect', (data: { clientId: string }) => {
-    const prefix = `${data.clientId}:`;
-    clientShells.forEach((shell, key) => {
-      if (!key.startsWith(prefix)) return;
-      console.log(`[Worker] Cleaning up PTY for client ${data.clientId}`);
+  // Handle explicit session close from client
+  socket.on('kill-session', (data: { sessionId: string }) => {
+    const sessionId = normalizeSessionId(data.sessionId);
+    if (!sessionId) return;
+    const shell = sessionShells.get(sessionId);
+    if (shell) {
+      console.log(`[Worker] Killing PTY for session ${sessionId}`);
       try {
         shell.kill();
       } catch (e) {
         // Ignore errors during cleanup
       }
-      clientShells.delete(key);
-    });
+      sessionShells.delete(sessionId);
+    }
+  });
+
+  // Client disconnect - sessions persist, don't kill PTYs
+  socket.on('client-disconnect', (data: { clientId: string }) => {
+    console.log(`[Worker] Client ${data.clientId} disconnected - sessions persist`);
+    // Sessions are persistent, we don't kill PTYs when clients disconnect
   });
 }
 
@@ -121,18 +130,14 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
-function createShellForClient(
-  shellKey: string,
-  clientId: string,
-  sessionId?: string,
+function createShellForSession(
+  sessionId: string,
   cols: number = 80,
   rows: number = 30,
 ): pty.IPty {
   const shellCmd = process.env.SHELL || 'bash';
   
-  const normalizedSessionId = normalizeSessionId(sessionId);
-  const sessionLabel = normalizedSessionId ? `/${normalizedSessionId}` : '';
-  console.log(`[Worker] Spawning PTY for client ${clientId}${sessionLabel} (${shellCmd}) with dimensions ${cols}x${rows}...`);
+  console.log(`[Worker] Spawning persistent PTY for session ${sessionId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
 
   const baseEnv = {
     PATH: process.env.PATH,
@@ -152,17 +157,21 @@ function createShellForClient(
 
   shell.onData((data) => {
     if (socket && socket.connected) {
+      // Broadcast to all clients - nexus will route to appropriate clients
       socket.emit('output', {
-        clientId,
-        sessionId: normalizedSessionId,
+        sessionId,
         output: data,
       });
     }
   });
 
   shell.onExit(({ exitCode, signal }) => {
-    console.log(`[Worker] Shell for client ${clientId} exited (Code: ${exitCode}, Signal: ${signal}).`);
-    clientShells.delete(shellKey);
+    console.log(`[Worker] Shell for session ${sessionId} exited (Code: ${exitCode}, Signal: ${signal}).`);
+    sessionShells.delete(sessionId);
+    // Notify nexus that this session's shell has exited
+    if (socket && socket.connected) {
+      socket.emit('session-shell-exited', { sessionId, exitCode, signal });
+    }
   });
 
   return shell;

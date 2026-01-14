@@ -98,6 +98,8 @@ const rawJwtSecret = (process.env.NEXUS_JWT_SECRET || '').trim();
 const jwtSecret = resolveJwtSecret(rawJwtSecret);
 const workerSharedToken = (process.env.WORKER_TOKEN || '').trim();
 const setupToken = (process.env.NEXUS_SETUP_TOKEN || '').trim();
+
+const normalizeWorkerKey = (name: string) => name.trim().toLowerCase();
 const allowInsecureWorkers = /^(true|1|yes)$/i.test(process.env.ALLOW_UNAUTHENTICATED_WORKERS || '');
 const workers: Map<string, Worker> = new Map();
 const HEALTH_TIMEOUT_MS = Number(process.env.WORKER_HEALTH_TIMEOUT_MS || 15000);
@@ -380,12 +382,7 @@ io.on('connection', (socket: Socket) => {
       if (socket.data.role !== 'client') return;
       console.log(`Client registered: ${socket.id}`);
       socket.emit('worker-list', serializeWorkers());
-      // Send existing sessions to newly connected client
-      const sessions = Array.from(sharedSessions.values()).map(s => ({
-        ...s,
-        output: undefined
-      }));
-      socket.emit('session-list', sessions);
+      // Client will request session-list via 'get-session-list' after processing workers
     }
   });
 
@@ -408,7 +405,16 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('close-session', (data: { sessionId: string }) => {
     if (socket.data.role !== 'client') return;
-    if (sharedSessions.has(data.sessionId)) {
+    const session = sharedSessions.get(data.sessionId);
+    if (session) {
+      // Find the worker for this session and tell it to kill the PTY
+      const worker = Array.from(workers.values()).find(w => 
+        normalizeWorkerKey(w.name) === session.workerKey
+      );
+      if (worker) {
+        io.to(worker.socketId).emit('kill-session', { sessionId: data.sessionId });
+      }
+      
       sharedSessions.delete(data.sessionId);
       deleteSessionFromDb(data.sessionId);
       broadcastSessionList();
@@ -432,6 +438,15 @@ io.on('connection', (socket: Socket) => {
     if (session && typeof callback === 'function') {
       callback(session.output);
     }
+  });
+
+  socket.on('get-session-list', () => {
+    if (socket.data.role !== 'client') return;
+    const sessions = Array.from(sharedSessions.values()).map(s => ({
+      ...s,
+      output: undefined
+    }));
+    socket.emit('session-list', sessions);
   });
 
   socket.on('execute', (data: { workerId: string; sessionId?: string; command: string }) => {

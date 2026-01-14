@@ -87,6 +87,7 @@ function App() {
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionRef = useRef<string | null>(null);
   const lastWorkerRef = useRef<string | null>(null);
+  const workersRef = useRef<Worker[]>([]);
   const storedActiveSessionRef = useRef<string | null>(null);
   const savedSessionsRef = useRef<StoredSession[]>([]);
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
@@ -403,9 +404,13 @@ function App() {
     newSocket.on('disconnect', () => setConnectionState('disconnected'));
 
     newSocket.on('worker-list', (list: Worker[]) => {
+      workersRef.current = list;
       setWorkers(list);
       rebindSessionsToWorkers(list);
       hydrateSavedSessions(list);
+      
+      // Request session list from server now that we have workers
+      newSocket.emit('get-session-list');
 
       const preferredWorker = lastWorkerRef.current
         ? list.find((w) => normalizeWorkerKey(w.name) === lastWorkerRef.current)
@@ -440,8 +445,8 @@ function App() {
       serverSessions.forEach(ss => {
         const existsLocally = sessionsRef.current.some(s => s.id === ss.id);
         if (!existsLocally) {
-          // Find worker for this session
-          const worker = workers.find(w => normalizeWorkerKey(w.name) === ss.workerKey);
+          // Find worker for this session using workersRef (not state which may be stale)
+          const worker = workersRef.current.find(w => normalizeWorkerKey(w.name) === ss.workerKey);
           if (worker) {
             // Request output from server and create session
             newSocket.emit('get-session-output', { sessionId: ss.id }, (output: string) => {
@@ -457,6 +462,17 @@ function App() {
           }
         }
       });
+      
+      // Also remove sessions that no longer exist on server
+      const serverSessionIds = new Set(serverSessions.map(s => s.id));
+      const sessionsToRemove = sessionsRef.current.filter(s => !serverSessionIds.has(s.id));
+      sessionsToRemove.forEach(session => {
+        disposeSession(session);
+        delete sessionOutputRef.current[session.id];
+      });
+      if (sessionsToRemove.length > 0) {
+        setSessions(prev => prev.filter(s => serverSessionIds.has(s.id)));
+      }
     });
 
     // Handle session closed by another client
