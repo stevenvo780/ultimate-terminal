@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import '@xterm/xterm/css/xterm.css';
 import './App.css';
 
@@ -566,7 +567,9 @@ function App() {
     });
 
     const fitAddon = new FitAddon();
+    const clipboardAddon = new ClipboardAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(clipboardAddon);
     term.open(container);
     fitAddon.fit();
 
