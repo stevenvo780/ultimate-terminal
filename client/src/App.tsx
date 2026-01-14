@@ -807,9 +807,14 @@ function App() {
   useEffect(() => {
     // Show/hide terminal containers based on active session
     sessions.forEach(session => {
-      session.containerRef.style.display = session.id === activeSessionId ? 'block' : 'none';
+      session.containerRef.style.display = session.id === activeSessionId ? 'flex' : 'none';
       if (session.id === activeSessionId) {
-        setTimeout(() => fitAndResizeSession(session), 50);
+        // Double RAF to ensure layout is computed before fitting
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            fitAndResizeSession(session);
+          });
+        });
       }
     });
   }, [activeSessionId, sessions]);
