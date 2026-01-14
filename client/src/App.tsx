@@ -74,6 +74,8 @@ function App() {
   const [commandTab, setCommandTab] = useState<'history' | 'snippets'>('history');
   const [commandHistory, setCommandHistory] = useState<Record<string, string[]>>({});
   const [commandSnippets, setCommandSnippets] = useState<Record<string, CommandSnippet[]>>({});
+  const [tagModalWorker, setTagModalWorker] = useState<Worker | null>(null);
+  const [tagModalInput, setTagModalInput] = useState<string>('');
   
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -720,10 +722,34 @@ function App() {
   const editWorkerTags = (worker: Worker) => {
     const workerKey = normalizeWorkerKey(worker.name);
     const current = (workerTags[workerKey] || []).join(', ');
-    const next = window.prompt(`Tags para ${worker.name} (separadas por coma)`, current);
-    if (next === null) return;
-    const parsed = parseTagsInput(next);
+    setTagModalInput(current);
+    setTagModalWorker(worker);
+  };
+
+  const saveWorkerTags = () => {
+    if (!tagModalWorker) return;
+    const workerKey = normalizeWorkerKey(tagModalWorker.name);
+    const parsed = parseTagsInput(tagModalInput);
     setWorkerTags((prev) => ({ ...prev, [workerKey]: parsed }));
+    setTagModalWorker(null);
+    setTagModalInput('');
+  };
+
+  const deleteWorker = (worker: Worker) => {
+    if (worker.status !== 'offline') {
+      alert('Solo se pueden eliminar workers desconectados');
+      return;
+    }
+    if (!confirm(`¿Eliminar worker "${worker.name}" de la lista?`)) return;
+    socket?.emit('delete-worker', { workerId: worker.id });
+    setWorkers((prev) => prev.filter((w) => w.id !== worker.id));
+    const workerKey = normalizeWorkerKey(worker.name);
+    setWorkerTags((prev) => {
+      const next = { ...prev };
+      delete next[workerKey];
+      return next;
+    });
+    setTagModalWorker(null);
   };
 
   const clearActiveHistory = () => {
@@ -1203,6 +1229,48 @@ function App() {
               <button className="close-btn" onClick={() => setShowSettings(false)}>✕</button>
             </div>
             <AuthForm />
+          </div>
+        </div>
+      )}
+      {tagModalWorker && (
+        <div className="modal-overlay" onClick={() => setTagModalWorker(null)}>
+          <div className="modal tag-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Editar Worker</h3>
+              <button className="close-btn" onClick={() => setTagModalWorker(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="worker-info">
+                <strong>{tagModalWorker.name}</strong>
+                <span className={`status-badge ${tagModalWorker.status}`}>
+                  {tagModalWorker.status === 'offline' ? 'Desconectado' : 'Conectado'}
+                </span>
+              </div>
+              <label className="form-label">
+                Tags (separadas por coma)
+                <input
+                  type="text"
+                  className="form-input"
+                  value={tagModalInput}
+                  onChange={(e) => setTagModalInput(e.target.value)}
+                  placeholder="produccion, backend, aws..."
+                  onKeyDown={(e) => e.key === 'Enter' && saveWorkerTags()}
+                />
+              </label>
+              <div className="modal-actions">
+                <button className="btn-primary" onClick={saveWorkerTags}>
+                  Guardar Tags
+                </button>
+                {tagModalWorker.status === 'offline' && (
+                  <button 
+                    className="btn-danger" 
+                    onClick={() => deleteWorker(tagModalWorker)}
+                  >
+                    Eliminar Worker
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
