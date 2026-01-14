@@ -427,6 +427,52 @@ function App() {
       }
     });
 
+    // Handle server-side session list (for syncing across clients)
+    newSocket.on('session-list', (serverSessions: Array<{
+      id: string;
+      workerName: string;
+      workerKey: string;
+      displayName: string;
+      createdAt: number;
+      lastActiveAt: number;
+    }>) => {
+      // Restore sessions from server that we don't have locally
+      serverSessions.forEach(ss => {
+        const existsLocally = sessionsRef.current.some(s => s.id === ss.id);
+        if (!existsLocally) {
+          // Find worker for this session
+          const worker = workers.find(w => normalizeWorkerKey(w.name) === ss.workerKey);
+          if (worker) {
+            // Request output from server and create session
+            newSocket.emit('get-session-output', { sessionId: ss.id }, (output: string) => {
+              createNewSession(worker, {
+                sessionId: ss.id,
+                displayName: ss.displayName,
+                createdAt: ss.createdAt,
+                lastActiveAt: ss.lastActiveAt,
+                initialOutput: output || '',
+                focus: false,
+              });
+            });
+          }
+        }
+      });
+    });
+
+    // Handle session closed by another client
+    newSocket.on('session-closed', (data: { sessionId: string }) => {
+      const session = sessionsRef.current.find(s => s.id === data.sessionId);
+      if (session) {
+        disposeSession(session);
+        delete sessionOutputRef.current[session.id];
+        setSessions(prev => prev.filter(s => s.id !== data.sessionId));
+        if (activeSessionRef.current === data.sessionId) {
+          const remaining = sessionsRef.current.filter(s => s.id !== data.sessionId);
+          setActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+        }
+      }
+    });
+
     newSocket.on('output', (data: { workerId: string; sessionId?: string; data: string }) => {
       const targetSessions = data.sessionId
         ? sessionsRef.current.filter((session) => session.id === data.sessionId)
@@ -626,6 +672,16 @@ function App() {
       setActiveSessionId(sessionId);
     }
 
+    // Notify server about new session (unless restoring from server)
+    if (!options?.sessionId && socketRef.current) {
+      socketRef.current.emit('create-session', {
+        id: sessionId,
+        workerName: worker.name,
+        workerKey,
+        displayName,
+      });
+    }
+
     // Initial resize and trigger prompt
     setTimeout(() => {
       handleResize();
@@ -642,6 +698,11 @@ function App() {
   };
 
   const closeSession = (sessionId: string) => {
+    // Notify server
+    if (socketRef.current) {
+      socketRef.current.emit('close-session', { sessionId });
+    }
+    
     setSessions(prevSessions => {
       const session = prevSessions.find(s => s.id === sessionId);
       if (!session) return prevSessions;
@@ -677,6 +738,10 @@ function App() {
     if (!session) return;
     const newName = window.prompt('Nuevo nombre para la sesion', session.displayName);
     if (newName && newName.trim().length > 0) {
+      // Notify server
+      if (socketRef.current) {
+        socketRef.current.emit('rename-session', { sessionId, displayName: newName.trim() });
+      }
       setSessions((prev) =>
         prev.map((s) => (s.id === sessionId ? { ...s, displayName: newName.trim() } : s)),
       );

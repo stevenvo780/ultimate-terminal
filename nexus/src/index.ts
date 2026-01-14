@@ -6,10 +6,11 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import Database from 'better-sqlite3';
 
 interface Worker {
   id: string;
@@ -24,6 +25,16 @@ interface AuthState {
   salt: string;
   iterations: number;
   updatedAt: string;
+}
+
+interface SharedSession {
+  id: string;
+  workerName: string;
+  workerKey: string;
+  displayName: string;
+  createdAt: number;
+  lastActiveAt: number;
+  output: string;
 }
 
 const app = express();
@@ -43,8 +54,46 @@ const io = new Server(httpServer, {
   },
 });
 
-const authFilePath = path.resolve(process.cwd(), '.qodo', 'auth.json');
-const auditFilePath = path.resolve(process.cwd(), '.qodo', 'audit.log');
+// Database setup
+const dataDir = path.resolve(process.cwd(), '.qodo');
+if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+const dbPath = path.join(dataDir, 'nexus.db');
+const db = new Database(dbPath);
+db.pragma('journal_mode = WAL');
+
+// Create tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS auth (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    password_hash TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    iterations INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    worker_name TEXT NOT NULL,
+    worker_key TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_active_at INTEGER NOT NULL,
+    output TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    event TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+`);
+
+const auditFilePath = path.join(dataDir, 'audit.log');
+
+// In-memory sessions store
+let sharedSessions: Map<string, SharedSession> = new Map();
+const MAX_OUTPUT_CHARS = 50000;
+const SESSION_SAVE_DEBOUNCE_MS = 2000;
+let sessionSaveTimer: NodeJS.Timeout | null = null;
 const rawJwtSecret = (process.env.NEXUS_JWT_SECRET || '').trim();
 const jwtSecret = resolveJwtSecret(rawJwtSecret);
 const workerSharedToken = (process.env.WORKER_TOKEN || '').trim();
@@ -119,19 +168,59 @@ function isSetupAllowed(req: Request) {
   return safeEqual(token, setupToken);
 }
 
-async function ensureAuthDir() {
-  const dir = path.dirname(authFilePath);
-  await fs.mkdir(dir, { recursive: true });
-}
-
 async function appendAudit(entry: Record<string, any>) {
   try {
-    await ensureAuthDir();
-    const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
-    await fs.appendFile(auditFilePath, `${line}\n`, 'utf-8');
+    const stmt = db.prepare('INSERT INTO audit (ts, event, data) VALUES (?, ?, ?)');
+    stmt.run(new Date().toISOString(), entry.event || 'unknown', JSON.stringify(entry));
   } catch (err) {
     console.error('Failed to write audit entry', err);
   }
+}
+
+function loadSessionsFromDb(): Map<string, SharedSession> {
+  const rows = db.prepare('SELECT * FROM sessions').all() as Array<{
+    id: string; worker_name: string; worker_key: string; display_name: string;
+    created_at: number; last_active_at: number; output: string;
+  }>;
+  return new Map(rows.map(r => [r.id, {
+    id: r.id,
+    workerName: r.worker_name,
+    workerKey: r.worker_key,
+    displayName: r.display_name,
+    createdAt: r.created_at,
+    lastActiveAt: r.last_active_at,
+    output: r.output,
+  }]));
+}
+
+function saveSessionToDb(session: SharedSession) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO sessions (id, worker_name, worker_key, display_name, created_at, last_active_at, output)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(session.id, session.workerName, session.workerKey, session.displayName, 
+           session.createdAt, session.lastActiveAt, session.output);
+}
+
+function deleteSessionFromDb(sessionId: string) {
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+}
+
+function scheduleSessionSave(session: SharedSession) {
+  // Debounce writes per session
+  if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(() => {
+    saveSessionToDb(session);
+    sessionSaveTimer = null;
+  }, SESSION_SAVE_DEBOUNCE_MS);
+}
+
+function broadcastSessionList() {
+  const sessions = Array.from(sharedSessions.values()).map(s => ({
+    ...s,
+    output: undefined // Don't send full output in list
+  }));
+  io.emit('session-list', sessions);
 }
 
 function serializeWorkers() {
@@ -146,18 +235,24 @@ function broadcastWorkerList() {
 }
 
 async function loadAuthState(): Promise<AuthState | null> {
-  try {
-    const data = await fs.readFile(authFilePath, 'utf-8');
-    return JSON.parse(data) as AuthState;
-  } catch (err: any) {
-    if (err.code === 'ENOENT') return null;
-    throw err;
-  }
+  const row = db.prepare('SELECT * FROM auth WHERE id = 1').get() as {
+    password_hash: string; salt: string; iterations: number; updated_at: string;
+  } | undefined;
+  if (!row) return null;
+  return {
+    passwordHash: row.password_hash,
+    salt: row.salt,
+    iterations: row.iterations,
+    updatedAt: row.updated_at,
+  };
 }
 
 async function saveAuthState(state: AuthState) {
-  await ensureAuthDir();
-  await fs.writeFile(authFilePath, JSON.stringify(state, null, 2), 'utf-8');
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO auth (id, password_hash, salt, iterations, updated_at)
+    VALUES (1, ?, ?, ?, ?)
+  `);
+  stmt.run(state.passwordHash, state.salt, state.iterations, state.updatedAt);
 }
 
 function signToken() {
@@ -285,6 +380,57 @@ io.on('connection', (socket: Socket) => {
       if (socket.data.role !== 'client') return;
       console.log(`Client registered: ${socket.id}`);
       socket.emit('worker-list', serializeWorkers());
+      // Send existing sessions to newly connected client
+      const sessions = Array.from(sharedSessions.values()).map(s => ({
+        ...s,
+        output: undefined
+      }));
+      socket.emit('session-list', sessions);
+    }
+  });
+
+  // Session management events
+  socket.on('create-session', (data: { id: string; workerName: string; workerKey: string; displayName: string }) => {
+    if (socket.data.role !== 'client') return;
+    const session: SharedSession = {
+      id: data.id,
+      workerName: data.workerName,
+      workerKey: data.workerKey,
+      displayName: data.displayName,
+      createdAt: Date.now(),
+      lastActiveAt: Date.now(),
+      output: '',
+    };
+    sharedSessions.set(data.id, session);
+    saveSessionToDb(session);
+    broadcastSessionList();
+  });
+
+  socket.on('close-session', (data: { sessionId: string }) => {
+    if (socket.data.role !== 'client') return;
+    if (sharedSessions.has(data.sessionId)) {
+      sharedSessions.delete(data.sessionId);
+      deleteSessionFromDb(data.sessionId);
+      broadcastSessionList();
+      io.emit('session-closed', { sessionId: data.sessionId });
+    }
+  });
+
+  socket.on('rename-session', (data: { sessionId: string; displayName: string }) => {
+    if (socket.data.role !== 'client') return;
+    const session = sharedSessions.get(data.sessionId);
+    if (session) {
+      session.displayName = data.displayName;
+      saveSessionToDb(session);
+      broadcastSessionList();
+    }
+  });
+
+  socket.on('get-session-output', (data: { sessionId: string }, callback: (output: string) => void) => {
+    if (socket.data.role !== 'client') return;
+    const session = sharedSessions.get(data.sessionId);
+    if (session && typeof callback === 'function') {
+      callback(session.output);
     }
   });
 
@@ -335,19 +481,23 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('output', (data: { clientId?: string; sessionId?: string; output: string }) => {
     if (socket.data.role !== 'worker') return;
-    if (data.clientId) {
-      io.to(data.clientId).emit('output', {
-        workerId: socket.id,
-        sessionId: data.sessionId,
-        data: data.output,
-      });
-    } else {
-      io.emit('output', {
-        workerId: socket.id,
-        sessionId: data.sessionId,
-        data: data.output,
-      });
+    
+    // Store output in shared session
+    if (data.sessionId) {
+      const session = sharedSessions.get(data.sessionId);
+      if (session) {
+        session.output = (session.output + data.output).slice(-MAX_OUTPUT_CHARS);
+        session.lastActiveAt = Date.now();
+        scheduleSessionSave(session);
+      }
     }
+    
+    // Broadcast to all clients so everyone sees the output
+    io.emit('output', {
+      workerId: socket.id,
+      sessionId: data.sessionId,
+      data: data.output,
+    });
   });
 
   socket.on('disconnect', () => {
@@ -382,10 +532,15 @@ if (existsSync(clientDistPath)) {
   console.log(`Serving client from ${clientDistPath}`);
 }
 
+// Load sessions from SQLite and start server
+sharedSessions = loadSessionsFromDb();
+console.log(`[Nexus] Loaded ${sharedSessions.size} sessions from database`);
+
 bootstrapInitialPassword()
   .then(() => {
     httpServer.listen(PORT, () => {
       console.log(`Nexus running on port ${PORT}`);
+      console.log(`[Nexus] Database: ${dbPath}`);
       if (!process.env.ADMIN_PASSWORD) {
         console.log('If first run, call /api/auth/setup to configure the admin password.');
       }
