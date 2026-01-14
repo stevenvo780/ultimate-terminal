@@ -146,41 +146,8 @@ function App() {
     return sameKey.find((worker) => worker.status !== 'offline') || sameKey[0];
   };
 
-  const hydrateSavedSessions = (list: Worker[]) => {
-    if (!savedSessionsRef.current.length || !terminalContainerRef.current) return;
-    savedSessionsRef.current.forEach((saved) => {
-      if (hydratedSessionIdsRef.current.has(saved.id)) return;
-      const worker = resolveWorkerForSession(
-        { workerId: saved.workerId || '', workerKey: saved.workerKey },
-        list,
-      );
-      if (!worker) return;
-      const initialOutput = sessionOutputRef.current[saved.id];
-      const session = createNewSession(worker, {
-        sessionId: saved.id,
-        displayName: saved.displayName,
-        createdAt: saved.createdAt,
-        lastActiveAt: saved.lastActiveAt,
-        initialOutput,
-        focus: false,
-      });
-      if (session) {
-        hydratedSessionIdsRef.current.add(saved.id);
-        if (!activeSessionRef.current && storedActiveSessionRef.current === saved.id) {
-          setActiveSessionId(saved.id);
-        }
-      }
-    });
-
-    if (!activeSessionRef.current && !storedActiveSessionRef.current) {
-      const recent = savedSessionsRef.current
-        .filter((saved) => hydratedSessionIdsRef.current.has(saved.id))
-        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
-      if (recent) {
-        setActiveSessionId(recent.id);
-      }
-    }
-  };
+  // Sessions are now restored from server only via 'session-list' event
+  // hydrateSavedSessions was removed - server is source of truth
 
   const rebindSessionsToWorkers = (list: Worker[]) => {
     setSessions((prev) =>
@@ -407,7 +374,8 @@ function App() {
       workersRef.current = list;
       setWorkers(list);
       rebindSessionsToWorkers(list);
-      hydrateSavedSessions(list);
+      // Sessions are now restored from server only, not from localStorage
+      // hydrateSavedSessions(list); -- removed, server is source of truth
       
       // Request session list from server now that we have workers
       newSocket.emit('get-session-list');
