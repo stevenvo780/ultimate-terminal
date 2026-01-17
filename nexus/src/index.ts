@@ -94,6 +94,27 @@ let sharedSessions: Map<string, SharedSession> = new Map();
 const MAX_OUTPUT_CHARS = 50000;
 const SESSION_SAVE_DEBOUNCE_MS = 2000;
 let sessionSaveTimer: NodeJS.Timeout | null = null;
+
+// Track clients connected to each session with their viewport sizes
+// sessionId -> Map<clientSocketId, {cols, rows}>
+const sessionClients: Map<string, Map<string, { cols: number; rows: number }>> = new Map();
+// Track current PTY size for each session
+const sessionPtySizes: Map<string, { cols: number; rows: number }> = new Map();
+
+// Calculate the maximum size needed for a session based on all connected clients
+function getMaxSessionSize(sessionId: string): { cols: number; rows: number } {
+  const clients = sessionClients.get(sessionId);
+  if (!clients || clients.size === 0) {
+    return { cols: 80, rows: 24 }; // Default
+  }
+  let maxCols = 80, maxRows = 24;
+  clients.forEach(size => {
+    maxCols = Math.max(maxCols, size.cols);
+    maxRows = Math.max(maxRows, size.rows);
+  });
+  return { cols: maxCols, rows: maxRows };
+}
+
 const rawJwtSecret = (process.env.NEXUS_JWT_SECRET || '').trim();
 const jwtSecret = resolveJwtSecret(rawJwtSecret);
 const workerSharedToken = (process.env.WORKER_TOKEN || '').trim();
@@ -484,13 +505,55 @@ io.on('connection', (socket: Socket) => {
   socket.on('resize', (data: { workerId: string; sessionId?: string; cols: number; rows: number }) => {
     if (socket.data.role !== 'client') return;
     const worker = workers.get(data.workerId);
-    if (worker) {
+    if (!worker || !data.sessionId) return;
+    
+    // Track this client's viewport size for the session
+    if (!sessionClients.has(data.sessionId)) {
+      sessionClients.set(data.sessionId, new Map());
+    }
+    sessionClients.get(data.sessionId)!.set(socket.id, { cols: data.cols, rows: data.rows });
+    
+    // Calculate max size needed across all clients viewing this session
+    const maxSize = getMaxSessionSize(data.sessionId);
+    const currentPtySize = sessionPtySizes.get(data.sessionId) || { cols: 80, rows: 24 };
+    
+    // Only resize PTY if the new max is larger than current
+    // (we never shrink while clients are connected)
+    if (maxSize.cols > currentPtySize.cols || maxSize.rows > currentPtySize.rows) {
+      const newCols = Math.max(maxSize.cols, currentPtySize.cols);
+      const newRows = Math.max(maxSize.rows, currentPtySize.rows);
+      sessionPtySizes.set(data.sessionId, { cols: newCols, rows: newRows });
+      
+      console.log(`[Nexus] Session ${data.sessionId.slice(-8)} resize: ${currentPtySize.cols}x${currentPtySize.rows} -> ${newCols}x${newRows} (client ${socket.id.slice(-6)}: ${data.cols}x${data.rows})`);
+      
       io.to(worker.socketId).emit('resize', { 
         clientId: socket.id,
         sessionId: data.sessionId,
-        cols: data.cols, 
-        rows: data.rows 
+        cols: newCols, 
+        rows: newRows 
       });
+    }
+  });
+
+  // Client joining a session - track their viewport
+  socket.on('join-session', (data: { sessionId: string; cols: number; rows: number }) => {
+    if (socket.data.role !== 'client') return;
+    if (!sessionClients.has(data.sessionId)) {
+      sessionClients.set(data.sessionId, new Map());
+    }
+    sessionClients.get(data.sessionId)!.set(socket.id, { cols: data.cols, rows: data.rows });
+    console.log(`[Nexus] Client ${socket.id.slice(-6)} joined session ${data.sessionId.slice(-8)} with viewport ${data.cols}x${data.rows}`);
+  });
+
+  // Client leaving a session
+  socket.on('leave-session', (data: { sessionId: string }) => {
+    if (socket.data.role !== 'client') return;
+    const clients = sessionClients.get(data.sessionId);
+    if (clients) {
+      clients.delete(socket.id);
+      // If no more clients, we could shrink the PTY, but we'll leave it for now
+      // to avoid disrupting any background processes
+      console.log(`[Nexus] Client ${socket.id.slice(-6)} left session ${data.sessionId.slice(-8)}`);
     }
   });
 
@@ -521,6 +584,39 @@ io.on('connection', (socket: Socket) => {
       workers.delete(socket.id);
       broadcastWorkerList();
     } else if (socket.data.role === 'client') {
+      // Remove client from all session tracking
+      sessionClients.forEach((clients, sessionId) => {
+        if (clients.has(socket.id)) {
+          clients.delete(socket.id);
+          console.log(`[Nexus] Client ${socket.id.slice(-6)} removed from session ${sessionId.slice(-8)} tracking`);
+          
+          // Recalculate and potentially shrink PTY if this was the largest client
+          if (clients.size > 0) {
+            const newMax = getMaxSessionSize(sessionId);
+            const currentSize = sessionPtySizes.get(sessionId);
+            if (currentSize && (newMax.cols < currentSize.cols || newMax.rows < currentSize.rows)) {
+              // Find the worker for this session and resize
+              const session = sharedSessions.get(sessionId);
+              if (session) {
+                const worker = Array.from(workers.values()).find(w => 
+                  normalizeWorkerKey(w.name) === session.workerKey
+                );
+                if (worker) {
+                  sessionPtySizes.set(sessionId, newMax);
+                  console.log(`[Nexus] Session ${sessionId.slice(-8)} shrink: ${currentSize.cols}x${currentSize.rows} -> ${newMax.cols}x${newMax.rows}`);
+                  io.to(worker.socketId).emit('resize', {
+                    clientId: socket.id,
+                    sessionId: sessionId,
+                    cols: newMax.cols,
+                    rows: newMax.rows
+                  });
+                }
+              }
+            }
+          }
+        }
+      });
+      
       // Notify all workers that this client has disconnected
       console.log(`Client disconnected: ${socket.id}`);
       workers.forEach((worker) => {

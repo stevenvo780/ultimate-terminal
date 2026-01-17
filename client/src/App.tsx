@@ -261,7 +261,15 @@ function App() {
     activeSessionRef.current = activeSessionId;
   }, [activeSessionId]);
 
+  // Track previous session to emit leave-session
+  const prevActiveSessionRef = useRef<string | null>(null);
+
   useEffect(() => {
+    // Emit leave-session for previous session
+    if (prevActiveSessionRef.current && prevActiveSessionRef.current !== activeSessionId && socketRef.current) {
+      socketRef.current.emit('leave-session', { sessionId: prevActiveSessionRef.current });
+    }
+    
     if (activeSessionId) {
       storedActiveSessionRef.current = activeSessionId;
       localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
@@ -276,11 +284,22 @@ function App() {
               : session,
           ),
         );
+        
+        // Emit join-session with current viewport size
+        if (socketRef.current && activeSession.terminal) {
+          socketRef.current.emit('join-session', {
+            sessionId: activeSessionId,
+            cols: activeSession.terminal.cols || 80,
+            rows: activeSession.terminal.rows || 24,
+          });
+        }
       }
     } else {
       storedActiveSessionRef.current = null;
       localStorage.removeItem(ACTIVE_SESSION_KEY);
     }
+    
+    prevActiveSessionRef.current = activeSessionId;
   }, [activeSessionId]);
 
   useEffect(() => {
