@@ -82,6 +82,20 @@ build_deb() {
     # Copy systemd service
     cp "$SCRIPT_DIR/${component}/systemd/${pkg_name}.service" "$pkg_dir/usr/lib/systemd/system/"
     
+    # Copy node-pty native module for worker
+    if [ "$component" = "worker" ]; then
+        mkdir -p "$pkg_dir/usr/lib/ultimate-terminal/prebuilds/linux-x64"
+        if [ -f "$PROJECT_ROOT/node_modules/node-pty/build/Release/pty.node" ]; then
+            cp "$PROJECT_ROOT/node_modules/node-pty/build/Release/pty.node" \
+               "$pkg_dir/usr/lib/ultimate-terminal/prebuilds/linux-x64/"
+            log_info "Included node-pty native module"
+        elif [ -f "$PROJECT_ROOT/node_modules/node-pty/prebuilds/linux-x64/pty.node" ]; then
+            cp "$PROJECT_ROOT/node_modules/node-pty/prebuilds/linux-x64/pty.node" \
+               "$pkg_dir/usr/lib/ultimate-terminal/prebuilds/linux-x64/"
+            log_info "Included node-pty prebuild module"
+        fi
+    fi
+    
     # Copy public folder and native modules for nexus
     if [ "$component" = "nexus" ]; then
         mkdir -p "$pkg_dir/usr/share/ultimate-terminal"
@@ -135,6 +149,18 @@ build_rpm() {
     cp "$PROJECT_ROOT/${component}/bin/${component}-linux" "$rpm_dir/SOURCES/${pkg_name}"
     cp "$SCRIPT_DIR/${component}/systemd/${pkg_name}.service" "$rpm_dir/SOURCES/"
     cp "$SCRIPT_DIR/${component}/rpm/${pkg_name}.spec" "$rpm_dir/SPECS/"
+    
+    # Copy node-pty native module for worker
+    if [ "$component" = "worker" ]; then
+        mkdir -p "$rpm_dir/SOURCES/prebuilds/linux-x64"
+        if [ -f "$PROJECT_ROOT/node_modules/node-pty/build/Release/pty.node" ]; then
+            cp "$PROJECT_ROOT/node_modules/node-pty/build/Release/pty.node" \
+               "$rpm_dir/SOURCES/prebuilds/linux-x64/"
+        elif [ -f "$PROJECT_ROOT/node_modules/node-pty/prebuilds/linux-x64/pty.node" ]; then
+            cp "$PROJECT_ROOT/node_modules/node-pty/prebuilds/linux-x64/pty.node" \
+               "$rpm_dir/SOURCES/prebuilds/linux-x64/"
+        fi
+    fi
     
     # Copy public folder and native modules for nexus
     if [ "$component" = "nexus" ]; then

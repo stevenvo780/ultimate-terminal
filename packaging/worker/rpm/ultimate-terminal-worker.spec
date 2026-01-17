@@ -13,9 +13,15 @@ Provides shell access with session persistence across browser reconnects.
 mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/systemd/system
 mkdir -p %{buildroot}/etc/ultimate-terminal
+mkdir -p %{buildroot}/usr/lib/ultimate-terminal/prebuilds/linux-x64
 
 install -m 755 %{_sourcedir}/ultimate-terminal-worker %{buildroot}/usr/bin/
 install -m 644 %{_sourcedir}/ultimate-terminal-worker.service %{buildroot}/usr/lib/systemd/system/
+
+# Install native pty module
+if [ -f %{_sourcedir}/prebuilds/linux-x64/pty.node ]; then
+    install -m 755 %{_sourcedir}/prebuilds/linux-x64/pty.node %{buildroot}/usr/lib/ultimate-terminal/prebuilds/linux-x64/
+fi
 
 %pre
 # Create system user if it doesn't exist
@@ -59,6 +65,7 @@ systemctl daemon-reload || true
 %files
 /usr/bin/ultimate-terminal-worker
 /usr/lib/systemd/system/ultimate-terminal-worker.service
+/usr/lib/ultimate-terminal/prebuilds/linux-x64/pty.node
 
 %changelog
 * Fri Jan 17 2026 Ultimate Terminal Team <support@ultimate-terminal.io> - 1.0.0-1
