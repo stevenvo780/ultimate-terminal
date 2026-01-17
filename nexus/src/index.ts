@@ -12,6 +12,9 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import Database from 'better-sqlite3';
 
+// Path to native module when running as packaged binary
+const SYSTEM_NATIVE_BINDING = '/usr/lib/ultimate-terminal/prebuilds/linux-x64/better_sqlite3.node';
+
 interface Worker {
   id: string;
   socketId: string;
@@ -58,7 +61,12 @@ const io = new Server(httpServer, {
 const dataDir = path.resolve(process.cwd(), '.qodo');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, 'nexus.db');
-const db = new Database(dbPath);
+
+// Use system native binding if available (for packaged binary), otherwise default
+const dbOptions = existsSync(SYSTEM_NATIVE_BINDING) 
+  ? { nativeBinding: SYSTEM_NATIVE_BINDING } 
+  : {};
+const db = new Database(dbPath, dbOptions);
 db.pragma('journal_mode = WAL');
 
 // Create tables
@@ -629,9 +637,14 @@ io.on('connection', (socket: Socket) => {
 
 const PORT = process.env.PORT || 3002;
 
-// Serve static client files
-const clientDistPath = path.resolve(process.cwd(), 'public');
-if (existsSync(clientDistPath)) {
+// Serve static client files - check multiple locations
+const clientPaths = [
+  path.resolve(process.cwd(), 'public'),                    // Local dev
+  '/usr/share/ultimate-terminal/public',                    // System package
+  path.resolve(__dirname, '../public'),                     // Relative to dist
+];
+const clientDistPath = clientPaths.find(p => existsSync(p));
+if (clientDistPath) {
   app.use(express.static(clientDistPath));
   // SPA fallback - serve index.html for all non-API routes
   app.get('*', (req, res, next) => {

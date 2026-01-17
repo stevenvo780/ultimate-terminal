@@ -82,11 +82,19 @@ build_deb() {
     # Copy systemd service
     cp "$SCRIPT_DIR/${component}/systemd/${pkg_name}.service" "$pkg_dir/usr/lib/systemd/system/"
     
-    # Copy public folder for nexus
+    # Copy public folder and native modules for nexus
     if [ "$component" = "nexus" ]; then
         mkdir -p "$pkg_dir/usr/share/ultimate-terminal"
         if [ -d "$PROJECT_ROOT/nexus/public" ]; then
             cp -r "$PROJECT_ROOT/nexus/public" "$pkg_dir/usr/share/ultimate-terminal/"
+        fi
+        
+        # Copy better-sqlite3 native module
+        mkdir -p "$pkg_dir/usr/lib/ultimate-terminal/prebuilds/linux-x64"
+        if [ -f "$PROJECT_ROOT/node_modules/better-sqlite3/build/Release/better_sqlite3.node" ]; then
+            cp "$PROJECT_ROOT/node_modules/better-sqlite3/build/Release/better_sqlite3.node" \
+               "$pkg_dir/usr/lib/ultimate-terminal/prebuilds/linux-x64/"
+            log_info "Included better-sqlite3 native module"
         fi
     fi
     
@@ -128,9 +136,18 @@ build_rpm() {
     cp "$SCRIPT_DIR/${component}/systemd/${pkg_name}.service" "$rpm_dir/SOURCES/"
     cp "$SCRIPT_DIR/${component}/rpm/${pkg_name}.spec" "$rpm_dir/SPECS/"
     
-    # Copy public folder for nexus
-    if [ "$component" = "nexus" ] && [ -d "$PROJECT_ROOT/nexus/public" ]; then
-        cp -r "$PROJECT_ROOT/nexus/public" "$rpm_dir/SOURCES/"
+    # Copy public folder and native modules for nexus
+    if [ "$component" = "nexus" ]; then
+        if [ -d "$PROJECT_ROOT/nexus/public" ]; then
+            cp -r "$PROJECT_ROOT/nexus/public" "$rpm_dir/SOURCES/"
+        fi
+        
+        # Copy better-sqlite3 native module
+        if [ -f "$PROJECT_ROOT/node_modules/better-sqlite3/build/Release/better_sqlite3.node" ]; then
+            mkdir -p "$rpm_dir/SOURCES/prebuilds/linux-x64"
+            cp "$PROJECT_ROOT/node_modules/better-sqlite3/build/Release/better_sqlite3.node" \
+               "$rpm_dir/SOURCES/prebuilds/linux-x64/"
+        fi
     fi
     
     # Build RPM
