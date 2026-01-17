@@ -1,0 +1,59 @@
+#!/bin/bash
+set -e
+
+# Create system user if it doesn't exist
+if ! id -u utworker >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin utworker
+fi
+
+# Create config directory
+mkdir -p /etc/ultimate-terminal
+chmod 755 /etc/ultimate-terminal
+
+# Create default config if not exists
+if [ ! -f /etc/ultimate-terminal/worker.env ]; then
+    cat > /etc/ultimate-terminal/worker.env << 'EOF'
+# Ultimate Terminal Worker Configuration
+# Edit this file and restart the service
+
+# Nexus server URL (required)
+NEXUS_URL=http://localhost:3002
+
+# Worker name (defaults to hostname)
+# WORKER_NAME=my-worker
+
+# Worker authentication token (must match WORKER_TOKEN on Nexus)
+WORKER_TOKEN=
+
+# Heartbeat interval in milliseconds
+# WORKER_HEARTBEAT_MS=5000
+
+# Shell to use (defaults to user's shell or bash)
+# SHELL=/bin/bash
+EOF
+    chmod 600 /etc/ultimate-terminal/worker.env
+fi
+
+# Enable and start service
+systemctl daemon-reload
+systemctl enable ultimate-terminal-worker.service || true
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║         Ultimate Terminal Worker installed!                  ║"
+echo "╠══════════════════════════════════════════════════════════════╣"
+echo "║  1. Edit configuration:                                      ║"
+echo "║     sudo nano /etc/ultimate-terminal/worker.env              ║"
+echo "║                                                              ║"
+echo "║  2. Start the service:                                       ║"
+echo "║     sudo systemctl start ultimate-terminal-worker            ║"
+echo "║                                                              ║"
+echo "║  3. Check status:                                            ║"
+echo "║     sudo systemctl status ultimate-terminal-worker           ║"
+echo "║                                                              ║"
+echo "║  4. View logs:                                               ║"
+echo "║     sudo journalctl -u ultimate-terminal-worker -f           ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+
+exit 0

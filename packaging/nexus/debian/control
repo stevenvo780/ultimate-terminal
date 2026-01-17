@@ -1,0 +1,10 @@
+Package: ultimate-terminal-nexus
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: libc6
+Maintainer: Ultimate Terminal Team <support@ultimate-terminal.io>
+Description: Ultimate Terminal Nexus Server
+ Central hub for Ultimate Terminal that manages workers,
+ sessions, and client connections with persistent session storage.

@@ -9,6 +9,8 @@ const NEXUS_URL = process.env.NEXUS_URL || 'http://localhost:3002';
 const WORKER_NAME = process.env.WORKER_NAME || os.hostname();
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 const HEARTBEAT_MS = Number(process.env.WORKER_HEARTBEAT_MS || 5000);
+// Auto-restart shell on exit for persistent sessions (like tmux)
+const AUTO_RESTART_SHELL = process.env.AUTO_RESTART_SHELL !== 'false';
 
 if (!WORKER_TOKEN) {
   console.warn('[Worker] No WORKER_TOKEN provided. Registration will be rejected by Nexus.');
@@ -20,6 +22,10 @@ console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 let socket: Socket;
 // Map of sessionId -> PTY instance (persistent sessions, not tied to clientId)
 const sessionShells = new Map<string, pty.IPty>();
+// Track session dimensions for respawn
+const sessionDimensions = new Map<string, { cols: number; rows: number }>();
+// Track sessions that were explicitly killed (not to be respawned)
+const killedSessions = new Set<string>();
 
 const normalizeSessionId = (sessionId?: string) => {
   const trimmed = sessionId?.trim();
@@ -99,9 +105,14 @@ function connect() {
   socket.on('kill-session', (data: { sessionId: string }) => {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) return;
+    
+    // Mark as explicitly killed to prevent auto-respawn
+    killedSessions.add(sessionId);
+    sessionDimensions.delete(sessionId);
+    
     const shell = sessionShells.get(sessionId);
     if (shell) {
-      console.log(`[Worker] Killing PTY for session ${sessionId}`);
+      console.log(`[Worker] Killing PTY for session ${sessionId} (explicit close)`);
       try {
         shell.kill();
       } catch (e) {
@@ -137,6 +148,9 @@ function createShellForSession(
 ): pty.IPty {
   const shellCmd = process.env.SHELL || 'bash';
   
+  // Store dimensions for potential respawn
+  sessionDimensions.set(sessionId, { cols, rows });
+  
   console.log(`[Worker] Spawning persistent PTY for session ${sessionId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
 
   const baseEnv = {
@@ -168,9 +182,42 @@ function createShellForSession(
   shell.onExit(({ exitCode, signal }) => {
     console.log(`[Worker] Shell for session ${sessionId} exited (Code: ${exitCode}, Signal: ${signal}).`);
     sessionShells.delete(sessionId);
-    // Notify nexus that this session's shell has exited
-    if (socket && socket.connected) {
-      socket.emit('session-shell-exited', { sessionId, exitCode, signal });
+    
+    // Check if this session was explicitly killed - if so, don't respawn
+    if (killedSessions.has(sessionId)) {
+      killedSessions.delete(sessionId);
+      sessionDimensions.delete(sessionId);
+      // Notify nexus that this session's shell has exited permanently
+      if (socket && socket.connected) {
+        socket.emit('session-shell-exited', { sessionId, exitCode, signal });
+      }
+      return;
+    }
+    
+    // Auto-restart shell for persistent sessions (like tmux behavior)
+    if (AUTO_RESTART_SHELL && socket && socket.connected) {
+      const dims = sessionDimensions.get(sessionId) || { cols: 80, rows: 30 };
+      console.log(`[Worker] Auto-respawning shell for session ${sessionId}...`);
+      
+      // Small delay before respawn to avoid rapid cycling
+      setTimeout(() => {
+        if (!killedSessions.has(sessionId) && socket && socket.connected) {
+          const newShell = createShellForSession(sessionId, dims.cols, dims.rows);
+          sessionShells.set(sessionId, newShell);
+          
+          // Send a message to client indicating shell was restarted
+          socket.emit('output', {
+            sessionId,
+            output: `\r\n\x1b[33m[Shell exited with code ${exitCode}. New shell started.]\x1b[0m\r\n\r\n`,
+          });
+        }
+      }, 500);
+    } else {
+      sessionDimensions.delete(sessionId);
+      // Notify nexus that this session's shell has exited
+      if (socket && socket.connected) {
+        socket.emit('session-shell-exited', { sessionId, exitCode, signal });
+      }
     }
   });
 

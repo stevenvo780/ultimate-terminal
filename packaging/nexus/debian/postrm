@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "purge" ]; then
+    rm -rf /etc/ultimate-terminal
+    rm -rf /var/lib/ultimate-terminal
+    
+    if id -u utnexus >/dev/null 2>&1; then
+        userdel utnexus || true
+    fi
+fi
+
+systemctl daemon-reload || true
+
+exit 0

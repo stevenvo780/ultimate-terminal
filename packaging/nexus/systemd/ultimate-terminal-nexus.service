@@ -1,0 +1,36 @@
+[Unit]
+Description=Ultimate Terminal Nexus Server
+Documentation=https://github.com/ultimate-terminal/ultimate-terminal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=utnexus
+Group=utnexus
+EnvironmentFile=/etc/ultimate-terminal/nexus.env
+ExecStart=/usr/bin/ultimate-terminal-nexus
+WorkingDirectory=/var/lib/ultimate-terminal
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+ReadWritePaths=/var/lib/ultimate-terminal
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ut-nexus
+
+[Install]
+WantedBy=multi-user.target

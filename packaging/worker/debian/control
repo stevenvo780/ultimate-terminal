@@ -1,0 +1,10 @@
+Package: ultimate-terminal-worker
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: libc6
+Maintainer: Ultimate Terminal Team <support@ultimate-terminal.io>
+Description: Ultimate Terminal Worker Agent
+ Persistent terminal worker that connects to Ultimate Terminal Nexus.
+ Provides shell access with session persistence across browser reconnects.

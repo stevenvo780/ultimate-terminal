@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove configuration on purge
+    rm -rf /etc/ultimate-terminal
+    
+    # Remove system user
+    if id -u utworker >/dev/null 2>&1; then
+        userdel utworker || true
+    fi
+fi
+
+systemctl daemon-reload || true
+
+exit 0

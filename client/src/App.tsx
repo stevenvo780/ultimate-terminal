@@ -738,6 +738,17 @@ function App() {
     const workerKey = normalizeWorkerKey(worker.name);
     localStorage.setItem(LAST_WORKER_KEY, workerKey);
     lastWorkerRef.current = workerKey;
+    // Always create a new session
+    return createNewSession(worker);
+  };
+
+  const focusWorkerSession = (workerId: string) => {
+    const worker = workers.find((w) => w.id === workerId);
+    if (!worker) return;
+    const workerKey = normalizeWorkerKey(worker.name);
+    localStorage.setItem(LAST_WORKER_KEY, workerKey);
+    lastWorkerRef.current = workerKey;
+    // Focus existing session for this worker, or create one if none exists
     const existing = sessionsRef.current.find((session) => session.workerKey === workerKey);
     if (existing) {
       setActiveSessionId(existing.id);
@@ -1006,7 +1017,7 @@ function App() {
                       <div
                         key={worker.id}
                         className={`worker-item ${worker.status === 'offline' ? 'offline' : ''}`}
-                        onClick={() => focusOrCreateSession(worker.id)}
+                        onClick={() => focusWorkerSession(worker.id)}
                       >
                         <div className="worker-main">
                           <div className="worker-name">{worker.name}</div>
@@ -1021,6 +1032,16 @@ function App() {
                               ))
                             : <span className="tag-chip empty">Sin tags</span>}
                         </div>
+                        <button
+                          className="add-session-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            focusOrCreateSession(worker.id);
+                          }}
+                          title="Nueva sesion en este worker"
+                        >
+                          +
+                        </button>
                         <button
                           className="tag-edit-btn"
                           onClick={(e) => {
@@ -1142,26 +1163,7 @@ function App() {
               )}
             </div>
           </div>
-          <div className="sidebar-footer">
-            <label>Nueva sesion en:</label>
-            <select
-              onChange={(e) => {
-                if (e.target.value) {
-                  focusOrCreateSession(e.target.value);
-                  e.target.value = '';
-                }
-              }}
-              defaultValue=""
-              disabled={!workers.length}
-            >
-              <option value="">Seleccionar worker...</option>
-              {workers.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}{w.status === 'offline' ? ' (offline)' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+
         </>
       )}
     </div>

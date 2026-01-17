@@ -1,0 +1,36 @@
+[Unit]
+Description=Ultimate Terminal Worker
+Documentation=https://github.com/ultimate-terminal/ultimate-terminal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/ultimate-terminal/worker.env
+ExecStart=/usr/bin/ultimate-terminal-worker
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+
+# Allow PTY allocation
+DeviceAllow=/dev/ptmx rw
+DeviceAllow=/dev/pts/* rw
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ut-worker
+
+[Install]
+WantedBy=multi-user.target
