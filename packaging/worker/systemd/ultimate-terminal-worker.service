@@ -13,11 +13,11 @@ RestartSec=5
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
-# Security hardening
+# Security hardening (relaxed for terminal access)
 NoNewPrivileges=false
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=false
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

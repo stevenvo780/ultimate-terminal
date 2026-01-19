@@ -167,21 +167,71 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
-// Get the default shell - prioritize zsh if available, then bash
-function getPreferredShell(): string {
-  // Check env first (can be set in worker.env)
-  if (process.env.SHELL && fs.existsSync(process.env.SHELL)) {
-    return process.env.SHELL;
+// Get user info for the target user (configurable or auto-detect)
+interface UserInfo {
+  username: string;
+  uid: number;
+  gid: number;
+  home: string;
+  shell: string;
+}
+
+function getTargetUser(): UserInfo | null {
+  // Priority 1: Explicit RUN_AS_USER in env
+  const runAsUser = process.env.RUN_AS_USER;
+  
+  try {
+    const passwd = fs.readFileSync('/etc/passwd', 'utf-8');
+    const lines = passwd.split('\n').filter(l => l.trim());
+    
+    // If RUN_AS_USER is specified, find that user
+    if (runAsUser) {
+      for (const line of lines) {
+        const parts = line.split(':');
+        if (parts[0] === runAsUser) {
+          return {
+            username: parts[0],
+            uid: parseInt(parts[2]),
+            gid: parseInt(parts[3]),
+            home: parts[5],
+            shell: parts[6] || '/bin/bash'
+          };
+        }
+      }
+      console.warn(`[Worker] RUN_AS_USER="${runAsUser}" not found, falling back to auto-detect`);
+    }
+    
+    // Priority 2: Find first regular user (UID >= 1000, excluding nobody/nogroup)
+    for (const line of lines) {
+      const parts = line.split(':');
+      const uid = parseInt(parts[2]);
+      const username = parts[0];
+      
+      // Skip system users and special accounts
+      if (uid >= 1000 && uid < 65534 && 
+          !['nobody', 'nogroup', 'nfsnobody'].includes(username)) {
+        return {
+          username: parts[0],
+          uid,
+          gid: parseInt(parts[3]),
+          home: parts[5],
+          shell: parts[6] || '/bin/bash'
+        };
+      }
+    }
+  } catch (e) {
+    console.error('[Worker] Failed to read /etc/passwd:', e);
   }
   
-  // Priority order: zsh > bash > sh
-  const shells = ['/usr/bin/zsh', '/bin/zsh', '/usr/bin/bash', '/bin/bash', '/bin/sh'];
-  for (const shell of shells) {
-    if (fs.existsSync(shell)) {
-      return shell;
-    }
-  }
-  return 'bash';
+  return null;
+}
+
+// Cache target user on startup
+const targetUser = getTargetUser();
+if (targetUser) {
+  console.log(`[Worker] Will spawn shells as user: ${targetUser.username} (uid=${targetUser.uid}, shell=${targetUser.shell})`);
+} else {
+  console.warn('[Worker] No target user found, will run shells as current user');
 }
 
 function createShellForSession(
@@ -189,27 +239,54 @@ function createShellForSession(
   cols: number = 80,
   rows: number = 30,
 ): pty.IPty {
-  const shellCmd = getPreferredShell();
-  
   // Store dimensions for potential respawn
   sessionDimensions.set(sessionId, { cols, rows });
   
-  console.log(`[Worker] Spawning persistent PTY for session ${sessionId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
+  let shellCmd: string;
+  let shellArgs: string[] = [];
+  let shellEnv: Record<string, string | undefined>;
+  let shellCwd: string;
+  let shellUid: number | undefined;
+  let shellGid: number | undefined;
+  
+  if (targetUser) {
+    // Use 'su -' to get a proper login shell with full user environment
+    // This loads .zshrc, .bashrc, etc.
+    shellCmd = '/bin/su';
+    shellArgs = ['-', targetUser.username];
+    shellCwd = targetUser.home;
+    
+    // Minimal env - su will set up the rest from user's profile
+    shellEnv = {
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      LANG: process.env.LANG || 'en_US.UTF-8',
+    };
+    
+    console.log(`[Worker] Spawning PTY for session ${sessionId} as ${targetUser.username} (${targetUser.shell}) with dimensions ${cols}x${rows}...`);
+  } else {
+    // Fallback: run as current user with basic shell
+    const shells = ['/usr/bin/zsh', '/bin/zsh', '/usr/bin/bash', '/bin/bash', '/bin/sh'];
+    shellCmd = shells.find(s => fs.existsSync(s)) || 'bash';
+    shellCwd = process.env.HOME || '/tmp';
+    
+    shellEnv = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      LANG: process.env.LANG || 'en_US.UTF-8',
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor'
+    };
+    
+    console.log(`[Worker] Spawning PTY for session ${sessionId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
+  }
 
-  const baseEnv = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    LANG: process.env.LANG || 'en_US.UTF-8',
-    TERM: 'xterm-256color',
-    COLORTERM: 'truecolor'
-  } as Record<string, string | undefined>;
-
-  const shell = pty.spawn(shellCmd, [], {
+  const shell = pty.spawn(shellCmd, shellArgs, {
     name: 'xterm-256color',
     cols,
     rows,
-    cwd: process.env.HOME,
-    env: baseEnv as any
+    cwd: shellCwd,
+    env: shellEnv as any
   });
 
   shell.onData((data) => {
