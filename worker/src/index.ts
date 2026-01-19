@@ -167,12 +167,29 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
+// Get the default shell - prioritize zsh if available, then bash
+function getPreferredShell(): string {
+  // Check env first (can be set in worker.env)
+  if (process.env.SHELL && fs.existsSync(process.env.SHELL)) {
+    return process.env.SHELL;
+  }
+  
+  // Priority order: zsh > bash > sh
+  const shells = ['/usr/bin/zsh', '/bin/zsh', '/usr/bin/bash', '/bin/bash', '/bin/sh'];
+  for (const shell of shells) {
+    if (fs.existsSync(shell)) {
+      return shell;
+    }
+  }
+  return 'bash';
+}
+
 function createShellForSession(
   sessionId: string,
   cols: number = 80,
   rows: number = 30,
 ): pty.IPty {
-  const shellCmd = process.env.SHELL || 'bash';
+  const shellCmd = getPreferredShell();
   
   // Store dimensions for potential respawn
   sessionDimensions.set(sessionId, { cols, rows });
