@@ -114,12 +114,13 @@ function connect() {
   socket.on('resize', (data: { clientId: string; sessionId?: string; cols: number; rows: number }) => {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) return;
-    let shell = sessionShells.get(sessionId);
-    if (!shell) {
-      shell = createShellForSession(sessionId, data.cols, data.rows);
-      sessionShells.set(sessionId, shell);
-    } else {
+    
+    // Only resize if shell already exists - don't create new shell on resize
+    const shell = sessionShells.get(sessionId);
+    if (shell) {
       try {
+        // Update stored dimensions
+        sessionDimensions.set(sessionId, { cols: data.cols, rows: data.rows });
         shell.resize(data.cols, data.rows);
       } catch (err) {
         // Ignore resize errors if shell is dead
@@ -250,10 +251,11 @@ function createShellForSession(
   let shellGid: number | undefined;
   
   if (targetUser) {
-    // Use 'su -' to get a proper login shell with full user environment
-    // This loads .zshrc, .bashrc, etc.
+    // Use 'su' to run a login shell as the target user
+    // Using -l (login) and -s to specify shell explicitly
+    // The '-' makes it a login shell which sources profile
     shellCmd = '/bin/su';
-    shellArgs = ['-', targetUser.username];
+    shellArgs = ['-l', targetUser.username, '-s', targetUser.shell];
     shellCwd = targetUser.home;
     
     // Minimal env - su will set up the rest from user's profile
@@ -261,6 +263,7 @@ function createShellForSession(
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       LANG: process.env.LANG || 'en_US.UTF-8',
+      LC_ALL: process.env.LC_ALL || 'en_US.UTF-8',
     };
     
     console.log(`[Worker] Spawning PTY for session ${sessionId} as ${targetUser.username} (${targetUser.shell}) with dimensions ${cols}x${rows}...`);
