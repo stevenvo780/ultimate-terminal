@@ -1217,7 +1217,7 @@ function App() {
     clearAuth();
   };
 
-  const Sidebar = () => (
+  const renderSidebar = () => (
     <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
         <h3>Sesiones</h3>
@@ -1470,7 +1470,7 @@ function App() {
     </div>
   );
 
-  const Controls = () => (
+  const renderControls = () => (
     <div className="topbar">
       <div className="brand">Ultimate Terminal</div>
       <div className="control-group">
@@ -1588,7 +1588,7 @@ function App() {
 
   return (
     <div className="layout">
-      <Controls />
+      {renderControls()}
       {!token && (
         <div className="modal-overlay">
           <div className="modal">
@@ -1650,7 +1650,7 @@ function App() {
         </div>
       )}
       <div className="content">
-        <Sidebar />
+        {renderSidebar()}
         <div className={`terminal-container layout-${layoutMode} ${layoutMode !== 'single' ? 'grid-layout' : ''}`} ref={terminalContainerRef}>
           <div className="terminal-toolbar">
             <div className="layout-toggle">

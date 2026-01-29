@@ -25,9 +25,9 @@ timeout 15 bash -c 'until curl -s http://localhost:3002 > /dev/null; do sleep 0.
 echo "Iniciando Worker..."
 setsid npm run start:worker > worker.log 2>&1 < /dev/null &
 
-# 4. Iniciar Client (Frontend)
-echo "Iniciando Client..."
-setsid npm run start:client > client.log 2>&1 < /dev/null &
+# 4. Iniciar Client (Frontend) -> DESACTIVADO: Nexus ya sirve los estáticos en ../client/dist
+# echo "Iniciando Client..."
+# setsid npm run start:client > client.log 2>&1 < /dev/null &
 
 # Esperar a que el Cliente inicie
 echo "Esperando a Client..."
