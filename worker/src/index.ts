@@ -48,8 +48,11 @@ console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 let socket: Socket;
 // Map of sessionId -> PTY instance (persistent sessions, not tied to clientId)
 const sessionShells = new Map<string, pty.IPty>();
-// Track session dimensions for respawn
+// Track session dimensions for respawn (last active state)
 const sessionDimensions = new Map<string, { cols: number; rows: number }>();
+// Track individual client viewports: sessionId -> clientId -> { cols, rows }
+const sessionClientViewports = new Map<string, Map<string, { cols: number; rows: number }>>();
+
 // Track sessions that were explicitly killed (not to be respawned)
 const killedSessions = new Set<string>();
 
@@ -57,6 +60,27 @@ const normalizeSessionId = (sessionId?: string) => {
   const trimmed = sessionId?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 };
+
+// Calculate common denominator dimensions for a session
+function calculateSessionDimensions(sessionId: string): { cols: number; rows: number } | null {
+  const viewports = sessionClientViewports.get(sessionId);
+  if (!viewports || viewports.size === 0) {
+    // If no active clients, return current dimensions or default
+    return sessionDimensions.get(sessionId) || { cols: 80, rows: 30 };
+  }
+
+  let minCols = Infinity;
+  let minRows = Infinity;
+
+  for (const dims of viewports.values()) {
+    if (dims.cols < minCols) minCols = dims.cols;
+    if (dims.rows < minRows) minRows = dims.rows;
+  }
+
+  if (minCols === Infinity || minRows === Infinity) return null;
+
+  return { cols: minCols, rows: minRows };
+}
 
 let retryDelay = 1000;
 const MAX_RETRY_DELAY = 30000;
@@ -116,6 +140,14 @@ function connect() {
       setTimeout(() => newlyCreatedShells.delete(sessionId), 500);
     }
     
+    // Update the viewport for this client implicitly acting as a keep-alive/registration
+    // This handles cases where a client executes without resizing first
+    if (!sessionClientViewports.has(sessionId)) {
+      sessionClientViewports.set(sessionId, new Map());
+    }
+    // We don't have dims here, but we assume current shell dims if not set
+    // This is optional optimization, resizing usually happens immediately after connect
+    
     // Skip the initial \n that old clients send - the shell already generated a prompt
     if (newlyCreatedShells.has(sessionId) && data.command === '\n') {
       console.log(`[Worker] Skipping initial \\n for new shell ${sessionId.slice(-8)}`);
@@ -132,21 +164,36 @@ function connect() {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) return;
     
-    // Update stored dimensions first
-    sessionDimensions.set(sessionId, { cols: data.cols, rows: data.rows });
+    // 1. Update this client's viewport
+    if (!sessionClientViewports.has(sessionId)) {
+      sessionClientViewports.set(sessionId, new Map());
+    }
+    sessionClientViewports.get(sessionId)!.set(data.clientId, { cols: data.cols, rows: data.rows });
+
+    // 2. Calculate optimal dimensions (intersection of all viewports)
+    const targetDims = calculateSessionDimensions(sessionId);
+    // If we have valid dims, use them; otherwise fallback to data
+    const finalCols = targetDims ? targetDims.cols : data.cols;
+    const finalRows = targetDims ? targetDims.rows : data.rows;
+
+    // Update stored authoritative dimensions
+    sessionDimensions.set(sessionId, { cols: finalCols, rows: finalRows });
     
     let shell = sessionShells.get(sessionId);
     if (shell) {
       // Resize existing shell
       try {
-        shell.resize(data.cols, data.rows);
+        // Only resize if different to avoid spamming pty
+        if (shell.cols !== finalCols || shell.rows !== finalRows) {
+          shell.resize(finalCols, finalRows);
+        }
       } catch (err) {
         // Ignore resize errors if shell is dead
       }
     } else {
       // Create shell with correct dimensions on first resize
-      console.log(`[Worker] Creating shell for session ${sessionId.slice(-8)} on resize (${data.cols}x${data.rows})`);
-      shell = createShellForSession(sessionId, data.cols, data.rows);
+      console.log(`[Worker] Creating shell for session ${sessionId.slice(-8)} on resize (${finalCols}x${finalRows})`);
+      shell = createShellForSession(sessionId, finalCols, finalRows);
       sessionShells.set(sessionId, shell);
     }
   });
@@ -159,6 +206,7 @@ function connect() {
     // Mark as explicitly killed to prevent auto-respawn
     killedSessions.add(sessionId);
     sessionDimensions.delete(sessionId);
+    sessionClientViewports.delete(sessionId);
     
     const shell = sessionShells.get(sessionId);
     if (shell) {
@@ -176,6 +224,25 @@ function connect() {
   socket.on('client-disconnect', (data: { clientId: string }) => {
     console.log(`[Worker] Client ${data.clientId} disconnected - sessions persist`);
     // Sessions are persistent, we don't kill PTYs when clients disconnect
+
+    // Remove this client's viewports from all sessions and re-optimize dimensions
+    for (const [sessionId, viewports] of sessionClientViewports.entries()) {
+      if (viewports.delete(data.clientId)) {
+        const newDims = calculateSessionDimensions(sessionId);
+        if (newDims) {
+          sessionDimensions.set(sessionId, newDims);
+          const shell = sessionShells.get(sessionId);
+          if (shell && (shell.cols !== newDims.cols || shell.rows !== newDims.rows)) {
+            try {
+              shell.resize(newDims.cols, newDims.rows);
+              console.log(`[Worker] Resizing session ${sessionId.slice(-8)} after client disconnect: ${newDims.cols}x${newDims.rows}`);
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+      }
+    }
   });
 }
 

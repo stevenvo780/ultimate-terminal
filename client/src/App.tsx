@@ -1035,6 +1035,28 @@ function App() {
     event.preventDefault();
   };
 
+  // Safety cleanup for stuck drag states (touch devices/missed events)
+  useEffect(() => {
+    const cleanupDrag = () => {
+      if (draggingSessionId) {
+        setDraggingSessionId(null);
+        setShowDropOverlay(false);
+      }
+    };
+
+    // If drag end is missed by the specific element, catch it globally
+    window.addEventListener('dragend', cleanupDrag);
+    // Touch/Pointer events for tablets where DnD might be flaky
+    window.addEventListener('pointerup', cleanupDrag);
+    window.addEventListener('touchend', cleanupDrag);
+
+    return () => {
+      window.removeEventListener('dragend', cleanupDrag);
+      window.removeEventListener('pointerup', cleanupDrag);
+      window.removeEventListener('touchend', cleanupDrag);
+    };
+  }, [draggingSessionId]);
+
   useEffect(() => {
     // Show/hide terminal containers based on active session
     const visibleIds = new Set<string>();
