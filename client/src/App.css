@@ -212,8 +212,14 @@
   background: #0c1117;
   border: 1px solid #1f1f1f;
   border-radius: 6px;
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
   transition: all 150ms ease;
+}
+
+.session-item:active {
+  cursor: grabbing;
 }
 
 .session-item:hover {
