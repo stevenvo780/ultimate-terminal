@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -44,6 +44,11 @@ interface CommandSnippet {
   command: string;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
 // In production (served from nexus), use relative URL. In dev, use env or localhost.
 const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || (import.meta.env.PROD ? '' : 'http://localhost:3002');
 const AUTH_KEY = 'ut-token';
@@ -51,6 +56,7 @@ const LAST_WORKER_KEY = 'ut-last-worker';
 const SESSION_STORE_KEY = 'ut-sessions-v1';
 const SESSION_OUTPUT_KEY = 'ut-session-output-v1';
 const ACTIVE_SESSION_KEY = 'ut-active-session';
+const GRID_SLOTS_KEY = 'ut-grid-slots-v1';
 const WORKER_TAGS_KEY = 'ut-worker-tags';
 const WORKER_GROUPING_KEY = 'ut-worker-grouping';
 const COMMAND_HISTORY_KEY = 'ut-command-history';
@@ -60,6 +66,8 @@ const MAX_HISTORY_ITEMS = 60;
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 function App() {
+  const getAdaptiveFontSize = () => (window.innerWidth <= 960 ? 13 : 14);
+
   const [socket, setSocket] = useState<Socket | null>(null);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [token, setToken] = useState<string | null>(null);
@@ -68,6 +76,10 @@ function App() {
   const [busy, setBusy] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [layoutMode, setLayoutMode] = useState<'single' | 'split-vertical' | 'quad'>('single');
+  const [gridSessionIds, setGridSessionIds] = useState<string[]>([]);
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [workerQuery, setWorkerQuery] = useState<string>('');
   const [workerGrouping, setWorkerGrouping] = useState<'none' | 'tag'>('none');
@@ -77,6 +89,8 @@ function App() {
   const [commandSnippets, setCommandSnippets] = useState<Record<string, CommandSnippet[]>>({});
   const [tagModalWorker, setTagModalWorker] = useState<Worker | null>(null);
   const [tagModalInput, setTagModalInput] = useState<string>('');
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showDropOverlay, setShowDropOverlay] = useState<boolean>(false);
   
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -258,6 +272,10 @@ function App() {
   }, [sessions]);
 
   useEffect(() => {
+    localStorage.setItem(GRID_SLOTS_KEY, JSON.stringify(gridSessionIds));
+  }, [gridSessionIds]);
+
+  useEffect(() => {
     activeSessionRef.current = activeSessionId;
   }, [activeSessionId]);
 
@@ -349,6 +367,8 @@ function App() {
     if (savedWorker) lastWorkerRef.current = savedWorker;
     const savedSessions = parseStored<StoredSession[]>(localStorage.getItem(SESSION_STORE_KEY), []);
     savedSessionsRef.current = savedSessions;
+    const savedGrid = parseStored<string[]>(localStorage.getItem(GRID_SLOTS_KEY), []);
+    setGridSessionIds(savedGrid.slice(0, 4));
     storedActiveSessionRef.current = localStorage.getItem(ACTIVE_SESSION_KEY);
     sessionOutputRef.current = parseStored<Record<string, string>>(
       localStorage.getItem(SESSION_OUTPUT_KEY),
@@ -366,6 +386,31 @@ function App() {
       .then((data) => setNeedsSetup(Boolean(data.needsSetup)))
       .catch(() => setNeedsSetup(true));
   }, []);
+
+  useEffect(() => {
+    const beforeInstallHandler = (event: Event) => {
+      const promptEvent = event as BeforeInstallPromptEvent;
+      promptEvent.preventDefault();
+      setInstallPrompt(promptEvent);
+    };
+
+    const installedHandler = () => {
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', beforeInstallHandler as EventListener);
+    window.addEventListener('appinstalled', installedHandler);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', beforeInstallHandler as EventListener);
+      window.removeEventListener('appinstalled', installedHandler);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Remove grid slots that no longer exist
+    setGridSessionIds((prev) => prev.filter((id) => sessionsRef.current.some((s) => s.id === id)));
+  }, [sessions]);
 
   useEffect(() => {
     if (!token) return;
@@ -604,7 +649,7 @@ function App() {
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"MesloLGS NF", "Fira Code", "JetBrains Mono", "Roboto Mono", "Monaco", "Courier New", monospace',
-      fontSize: 14,
+      fontSize: getAdaptiveFontSize(),
       cols: 80,
       rows: 24,
       allowTransparency: true,
@@ -638,6 +683,7 @@ function App() {
     const handleResize = () => {
       const isVisible = container.offsetParent !== null && container.clientWidth > 0 && container.clientHeight > 0;
       if (!isVisible) return;
+      term.options.fontSize = getAdaptiveFontSize();
       fitAddon.fit();
       if (socketRef.current && term.cols > 0 && term.rows > 0) {
         socketRef.current.emit('resize', {
@@ -685,22 +731,17 @@ function App() {
       });
     }
 
-    // Initial resize and trigger prompt
+    // Initial resize to set proper dimensions
+    // Note: We don't send an initial \n anymore - the shell already generates a prompt on startup
     setTimeout(() => {
       handleResize();
-      if (socketRef.current) {
-        socketRef.current.emit('execute', {
-          workerId: worker.id,
-          sessionId,
-          command: '\n',
-        });
-      }
     }, 100);
 
     return session;
   };
 
   const closeSession = (sessionId: string) => {
+    setGridSessionIds((prev) => prev.filter((id) => id !== sessionId));
     // Notify server
     if (socketRef.current) {
       socketRef.current.emit('close-session', { sessionId });
@@ -785,6 +826,35 @@ function App() {
       sessionId: session.id,
       command: '\n',
     });
+  };
+
+  const toggleFullscreen = async () => {
+    const target = terminalContainerRef.current || document.documentElement;
+    try {
+      if (!document.fullscreenElement) {
+        await target.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch (err) {
+      console.error('No se pudo cambiar a pantalla completa', err);
+    }
+  };
+
+  const handleInstallPWA = async () => {
+    if (!installPrompt) {
+      alert('La instalacion como PWA no esta disponible en este dispositivo/navegador.');
+      return;
+    }
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setInstallPrompt(null);
+      }
+    } catch (err) {
+      console.error('No se pudo lanzar la instalacion PWA', err);
+    }
   };
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) || null;
@@ -886,12 +956,116 @@ function App() {
     return a.localeCompare(b);
   });
 
+  const nextEmptySlot = () => {
+    const idx = gridSessionIds.findIndex((id) => !id);
+    return idx >= 0 ? idx : 0;
+  };
+
+  const assignGridSlot = (slotIndex: number, sessionId: string) => {
+    if (layoutMode === 'single') setLayoutMode('quad');
+    setGridSessionIds((prev) => {
+      const next = [...prev];
+      while (next.length < 4) next.push('');
+      // Remove duplicates first
+      for (let i = 0; i < next.length; i += 1) {
+        if (i !== slotIndex && next[i] === sessionId) {
+          next[i] = '';
+        }
+      }
+      next[slotIndex] = sessionId;
+      return next.slice(0, 4);
+    });
+    setActiveSessionId(sessionId);
+  };
+
+  const pinSessionToGrid = (sessionId: string) => {
+    assignGridSlot(nextEmptySlot(), sessionId);
+  };
+
+
+
+  const clearGrid = () => setGridSessionIds([]);
+
+  const handleSessionDragStart = (sessionId: string, displayName: string) => (event: DragEvent<HTMLDivElement>) => {
+    setDraggingSessionId(sessionId);
+    setShowDropOverlay(true);
+    event.dataTransfer.setData('text/plain', sessionId);
+    event.dataTransfer.setData('application/x-session-name', displayName);
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDropOnSlot = (slotIndex: number) => (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const sessionId = event.dataTransfer.getData('text/plain');
+    if (sessionId) {
+      assignGridSlot(slotIndex, sessionId);
+    }
+    setDraggingSessionId(null);
+    setShowDropOverlay(false);
+  };
+
+  const handleDragOverSlot = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDragEnd = () => {
+    setDraggingSessionId(null);
+    setShowDropOverlay(false);
+  };
+
+
+
+  const handleDropOnHotspot = (hotspotIndex: number) => (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const sessionId = event.dataTransfer.getData('text/plain');
+    if (sessionId) {
+      assignGridSlot(hotspotIndex, sessionId);
+      if (layoutMode === 'single') {
+         if (hotspotIndex === 1) setLayoutMode('split-vertical');
+         else if (hotspotIndex > 1) setLayoutMode('quad');
+      }
+    }
+    setDraggingSessionId(null);
+    setShowDropOverlay(false);
+  };
+
+  const handleDragOverHotspot = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
   useEffect(() => {
     // Show/hide terminal containers based on active session
-    sessions.forEach(session => {
-      session.containerRef.style.display = session.id === activeSessionId ? 'flex' : 'none';
+    const visibleIds = new Set<string>();
+    
+    if (layoutMode === 'single') {
+      if (activeSessionId) visibleIds.add(activeSessionId);
+    } else {
+      // Grid modes
+      const slots = layoutMode === 'split-vertical' ? [0, 1] : [0, 1, 2, 3];
+      slots.forEach(idx => {
+        if (gridSessionIds[idx]) visibleIds.add(gridSessionIds[idx]);
+      });
+    }
+
+    const orderMap: Record<string, number> = {};
+    gridSessionIds.forEach((id, idx) => {
+      if (id) orderMap[id] = idx;
+    });
+
+    sessions.forEach((session) => {
+      const visible = visibleIds.has(session.id);
+      session.containerRef.style.display = visible ? 'flex' : 'none';
+      session.containerRef.style.order = orderMap[session.id]?.toString() || '0';
+      
       if (session.id === activeSessionId) {
-        // Double RAF to ensure layout is computed before fitting
+        session.containerRef.classList.add('active-slot');
+      } else {
+        session.containerRef.classList.remove('active-slot');
+      }
+
+      if (visible) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             fitAndResizeSession(session);
@@ -899,7 +1073,102 @@ function App() {
         });
       }
     });
-  }, [activeSessionId, sessions]);
+  }, [activeSessionId, sessions, layoutMode, gridSessionIds]);
+
+  useEffect(() => {
+    if (!terminalContainerRef.current || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const active = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+      if (active) {
+        fitAndResizeSession(active);
+      }
+    });
+    observer.observe(terminalContainerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (!token) return;
+      if (!event.ctrlKey || !event.altKey) return;
+      const key = event.key.toLowerCase();
+
+      if (key === 'g') {
+        if (layoutMode === 'single') {
+          setLayoutMode('quad');
+        }
+        if (gridSessionIds.every((s) => !s) && activeSessionId) {
+          assignGridSlot(0, activeSessionId);
+        }
+        event.preventDefault();
+        return;
+      }
+      if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+        if (layoutMode === 'single') {
+             // Smart switching? No, just go to Quad for now as it's the superset
+             setLayoutMode('quad');
+        }
+        
+        // Navigation logic needs to strictly follow the slots
+        // 0 1
+        // 2 3
+        const currentSlot = gridSessionIds.findIndex(id => id === activeSessionId);
+        let nextSlot = currentSlot;
+
+        if (currentSlot === -1) {
+             // Not in grid, maybe set to 0
+             setActiveSessionId(gridSessionIds[0]);
+             return;
+        }
+
+        if (key === 'arrowleft') nextSlot = currentSlot === 1 ? 0 : (currentSlot === 3 ? 2 : currentSlot);
+        if (key === 'arrowright') nextSlot = currentSlot === 0 ? 1 : (currentSlot === 2 ? 3 : currentSlot);
+        if (key === 'arrowup') nextSlot = currentSlot === 2 ? 0 : (currentSlot === 3 ? 1 : currentSlot);
+        if (key === 'arrowdown') nextSlot = currentSlot === 0 ? 2 : (currentSlot === 1 ? 3 : currentSlot);
+        
+        const targetId = gridSessionIds[nextSlot];
+        if (targetId) {
+            setActiveSessionId(targetId);
+        } else {
+            // Empy slot? Maybe focus it explicitly (would require Focus state separate from activeSessionId)
+            // For now do nothing
+        }
+        event.preventDefault();
+        return;
+      }
+      if (/^[1-4]$/.test(key)) {
+        const slotIndex = Number(key) - 1;
+        const slotSession = gridSessionIds[slotIndex];
+        if (slotSession) {
+          if (layoutMode === 'single') setLayoutMode('quad');
+          setActiveSessionId(slotSession);
+          event.preventDefault();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [token, layoutMode, gridSessionIds, activeSessionId]);
+
+  useEffect(() => {
+    const active = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+    if (!active) return;
+    requestAnimationFrame(() => fitAndResizeSession(active));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+      const active = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+      if (active) {
+        requestAnimationFrame(() => fitAndResizeSession(active));
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const handleAuth = async (endpoint: 'setup' | 'login', password: string, setupToken?: string) => {
     setBusy(true);
@@ -966,12 +1235,25 @@ function App() {
                   key={session.id}
                   className={`session-item ${activeSessionId === session.id ? 'active' : ''} ${offlineSessions.has(session.id) ? 'offline' : ''}`}
                   onClick={() => switchSession(session.id)}
+                  draggable
+                  onDragStart={handleSessionDragStart(session.id, session.displayName)}
+                  onDragEnd={handleDragEnd}
                 >
                   <div className="session-info">
                     <div className="session-name">{session.displayName}</div>
                     {offlineSessions.has(session.id) && <span className="badge-offline">Offline</span>}
                     <div className="session-id">{session.id.substring(0, 12)}...</div>
                   </div>
+                  <button
+                    className="rename-session-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pinSessionToGrid(session.id);
+                    }}
+                    title="Enviar al grid"
+                  >
+                    ⬒
+                  </button>
                   <button
                     className="rename-session-btn"
                     onClick={(e) => {
@@ -1221,6 +1503,21 @@ function App() {
             Reanudar
           </button>
         )}
+        <button
+          className="ghost-btn fullscreen-btn"
+          onClick={toggleFullscreen}
+          title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+        >
+          {isFullscreen ? '⤢' : '⛶'}
+        </button>
+        <button
+          className="ghost-btn pwa-btn"
+          onClick={handleInstallPWA}
+          disabled={!installPrompt}
+          title={installPrompt ? 'Descargar como PWA' : 'PWA no disponible'}
+        >
+          ⇩ PWA
+        </button>
         <div className={`status ${
           connectionState === 'connected'
             ? 'ok'
@@ -1354,12 +1651,100 @@ function App() {
       )}
       <div className="content">
         <Sidebar />
-        <div className="terminal-container" ref={terminalContainerRef}>
+        <div className={`terminal-container layout-${layoutMode} ${layoutMode !== 'single' ? 'grid-layout' : ''}`} ref={terminalContainerRef}>
+          <div className="terminal-toolbar">
+            <div className="layout-toggle">
+              <button
+                className={`layout-icon-btn ${layoutMode === 'single' ? 'active' : ''}`}
+                onClick={() => setLayoutMode('single')}
+                title="Vista unica"
+              >
+                <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" fill="none" strokeWidth="2"/></svg>
+              </button>
+              <button
+                className={`layout-icon-btn ${layoutMode === 'split-vertical' ? 'active' : ''}`}
+                onClick={() => {
+                  if (layoutMode === 'single' && activeSessionId && !gridSessionIds[0]) {
+                    assignGridSlot(0, activeSessionId);
+                  }
+                  setLayoutMode('split-vertical');
+                }}
+                title="Vista Dividida"
+              >
+                <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M12 4v16" stroke="currentColor" fill="none" strokeWidth="2"/></svg>
+              </button>
+              <button
+                className={`layout-icon-btn ${layoutMode === 'quad' ? 'active' : ''}`}
+                onClick={() => {
+                  if (layoutMode === 'single' && activeSessionId && !gridSessionIds[0]) {
+                    assignGridSlot(0, activeSessionId);
+                  }
+                  setLayoutMode('quad');
+                }}
+                title="Vista Cuadruple"
+              >
+                <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M12 4v16M4 12h16" stroke="currentColor" fill="none" strokeWidth="2"/></svg>
+              </button>
+            </div>
+            {layoutMode !== 'single' && (
+               <div style={{ flex: 1 }}></div> 
+            )}
+            {layoutMode !== 'single' && (
+              <button 
+                className="ghost-btn" 
+                onClick={clearGrid} 
+                title="Limpiar grid"
+                style={{ fontSize: '0.8em', padding: '2px 8px' }}
+              >
+                Limpiar
+              </button>
+            )}
+          </div>
+          
+          {/* Render Empty Slot Placeholders to maintain Grid Structure */}
+          {layoutMode !== 'single' && (
+            <>
+              {(layoutMode === 'split-vertical' ? [0, 1] : [0, 1, 2, 3]).map((idx) => {
+                if (gridSessionIds[idx]) return null; // Session exists here (imperative)
+                return (
+                  <div
+                    key={`placeholder-${idx}`}
+                    className={`empty-slot-target ${draggingSessionId ? 'droppable' : ''}`}
+                    style={{ order: idx }}
+                    onDrop={handleDropOnSlot(idx)}
+                    onDragOver={handleDragOverSlot}
+                  >
+                    <div className="sc-icon">
+                       {draggingSessionId ? '⤓' : '+'}
+                    </div>
+                    <span>{draggingSessionId ? 'Soltar aquí' : 'Vacío'}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
           {sessions.length === 0 && token && (
             <div className="empty-state">
               <h2>No hay sesiones activas</h2>
               <p>Crea una nueva sesion desde el selector superior o el sidebar</p>
               {workers.length === 0 && <p className="muted">No hay workers conectados en este momento.</p>}
+            </div>
+          )}
+          
+          {/* Invisible Overlay for Dragging if needed - mostly handled by placeholders now but let's keep it for zone switching if Single mode */}
+          {showDropOverlay && layoutMode === 'single' && (
+            <div className="drop-overlay" onDragOver={handleDragOverHotspot} onDrop={handleDragEnd}>
+              {['Izquierda', 'Derecha', 'Abajo', 'Arriba'].map((label, idx) => (
+                <div
+                  key={`hotspot-${idx}`}
+                  className={`drop-zone drop-${idx}`}
+                  onDrop={handleDropOnHotspot(idx)}
+                  onDragOver={handleDragOverHotspot}
+                >
+                  {label}
+                </div>
+              ))}
             </div>
           )}
         </div>

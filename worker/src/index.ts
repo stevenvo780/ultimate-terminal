@@ -94,17 +94,34 @@ function connect() {
     scheduleReconnect();
   });
 
+  // Track newly created shells to ignore initial \n (backward compat with old clients)
+  const newlyCreatedShells = new Set<string>();
+
   socket.on('execute', (data: { clientId: string; sessionId?: string; command: string }) => {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) {
       console.log('[Worker] Ignoring execute without sessionId');
       return;
     }
+    
     let shell = sessionShells.get(sessionId);
+    const isNewShell = !shell;
     if (!shell) {
-      shell = createShellForSession(sessionId);
+      // Use stored dimensions if available (from a prior resize event)
+      const dims = sessionDimensions.get(sessionId) || { cols: 80, rows: 30 };
+      shell = createShellForSession(sessionId, dims.cols, dims.rows);
       sessionShells.set(sessionId, shell);
+      newlyCreatedShells.add(sessionId);
+      // Remove from newly created set after a short delay
+      setTimeout(() => newlyCreatedShells.delete(sessionId), 500);
     }
+    
+    // Skip the initial \n that old clients send - the shell already generated a prompt
+    if (newlyCreatedShells.has(sessionId) && data.command === '\n') {
+      console.log(`[Worker] Skipping initial \\n for new shell ${sessionId.slice(-8)}`);
+      return;
+    }
+    
     if (shell) {
       shell.write(data.command);
     }
@@ -115,16 +132,22 @@ function connect() {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) return;
     
-    // Only resize if shell already exists - don't create new shell on resize
-    const shell = sessionShells.get(sessionId);
+    // Update stored dimensions first
+    sessionDimensions.set(sessionId, { cols: data.cols, rows: data.rows });
+    
+    let shell = sessionShells.get(sessionId);
     if (shell) {
+      // Resize existing shell
       try {
-        // Update stored dimensions
-        sessionDimensions.set(sessionId, { cols: data.cols, rows: data.rows });
         shell.resize(data.cols, data.rows);
       } catch (err) {
         // Ignore resize errors if shell is dead
       }
+    } else {
+      // Create shell with correct dimensions on first resize
+      console.log(`[Worker] Creating shell for session ${sessionId.slice(-8)} on resize (${data.cols}x${data.rows})`);
+      shell = createShellForSession(sessionId, data.cols, data.rows);
+      sessionShells.set(sessionId, shell);
     }
   });
 
@@ -264,6 +287,8 @@ function createShellForSession(
       COLORTERM: 'truecolor',
       LANG: process.env.LANG || 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL || 'en_US.UTF-8',
+      // Disable zsh partial line indicator (%) that appears when output doesn't end with newline
+      PROMPT_EOL_MARK: '',
     };
     
     console.log(`[Worker] Spawning PTY for session ${sessionId} as ${targetUser.username} (${targetUser.shell}) with dimensions ${cols}x${rows}...`);

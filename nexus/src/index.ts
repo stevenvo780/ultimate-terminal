@@ -115,12 +115,13 @@ function getMaxSessionSize(sessionId: string): { cols: number; rows: number } {
   if (!clients || clients.size === 0) {
     return { cols: 80, rows: 24 }; // Default
   }
-  let maxCols = 80, maxRows = 24;
+  let maxCols = 0, maxRows = 0;
   clients.forEach(size => {
     maxCols = Math.max(maxCols, size.cols);
     maxRows = Math.max(maxRows, size.rows);
   });
-  return { cols: maxCols, rows: maxRows };
+  // Ensure at least minimal valid dimensions
+  return { cols: Math.max(2, maxCols), rows: Math.max(2, maxRows) };
 }
 
 const rawJwtSecret = (process.env.NEXUS_JWT_SECRET || '').trim();
@@ -525,20 +526,18 @@ io.on('connection', (socket: Socket) => {
     const maxSize = getMaxSessionSize(data.sessionId);
     const currentPtySize = sessionPtySizes.get(data.sessionId) || { cols: 80, rows: 24 };
     
-    // Only resize PTY if the new max is larger than current
-    // (we never shrink while clients are connected)
-    if (maxSize.cols > currentPtySize.cols || maxSize.rows > currentPtySize.rows) {
-      const newCols = Math.max(maxSize.cols, currentPtySize.cols);
-      const newRows = Math.max(maxSize.rows, currentPtySize.rows);
-      sessionPtySizes.set(data.sessionId, { cols: newCols, rows: newRows });
+    // Resize PTY if dimensions changed
+    // We update if the effective size across all clients has changed
+    if (maxSize.cols !== currentPtySize.cols || maxSize.rows !== currentPtySize.rows) {
+      sessionPtySizes.set(data.sessionId, maxSize);
       
-      console.log(`[Nexus] Session ${data.sessionId.slice(-8)} resize: ${currentPtySize.cols}x${currentPtySize.rows} -> ${newCols}x${newRows} (client ${socket.id.slice(-6)}: ${data.cols}x${data.rows})`);
+      console.log(`[Nexus] Session ${data.sessionId.slice(-8)} resize: ${currentPtySize.cols}x${currentPtySize.rows} -> ${maxSize.cols}x${maxSize.rows} (client ${socket.id.slice(-6)}: ${data.cols}x${data.rows})`);
       
       io.to(worker.socketId).emit('resize', { 
         clientId: socket.id,
         sessionId: data.sessionId,
-        cols: newCols, 
-        rows: newRows 
+        cols: maxSize.cols, 
+        rows: maxSize.rows 
       });
     }
   });
@@ -638,10 +637,18 @@ io.on('connection', (socket: Socket) => {
 const PORT = process.env.PORT || 3002;
 
 // Serve static client files - check multiple locations
+// Prefer the fresh Vite build (client/dist) before falling back to packaged assets
 const clientPaths = [
-  path.resolve(process.cwd(), 'public'),                    // Local dev
-  '/usr/share/ultimate-terminal/public',                    // System package
-  path.resolve(__dirname, '../public'),                     // Relative to dist
+  // Workspace build output when running from monorepo root
+  path.resolve(process.cwd(), 'client/dist'),
+  // Workspace build output when the cwd is the nexus workspace (workspaces change cwd)
+  path.resolve(process.cwd(), '../client/dist'),
+  // Local dev fallback
+  path.resolve(process.cwd(), 'public'),
+  // System package locations
+  '/usr/share/ultimate-terminal/public',
+  // Relative to compiled dist folder
+  path.resolve(__dirname, '../public'),
 ];
 const clientDistPath = clientPaths.find(p => existsSync(p));
 if (clientDistPath) {

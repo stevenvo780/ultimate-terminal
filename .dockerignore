@@ -1,0 +1,14 @@
+.git
+node_modules
+**/node_modules
+.gitignore
+.qodo
+.docker-data
+*.log
+*.tar.gz
+!client/dist
+dist-electron
+release
+.deploy
+.deploy*
+Dockerfile

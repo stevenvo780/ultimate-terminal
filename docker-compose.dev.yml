@@ -1,0 +1,42 @@
+version: '3.9'
+
+services:
+  nexus:
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+      args:
+        SERVICE: nexus
+    environment:
+      PORT: 3002
+      NEXUS_JWT_SECRET: dev-jwt-secret
+      ADMIN_PASSWORD: "zxcvFDSA90%"
+      WORKER_TOKEN: dev-shared-token
+      NEXUS_SETUP_TOKEN: dev-setup-token
+      ALLOW_UNAUTHENTICATED_WORKERS: "false"
+      CLIENT_ORIGIN: http://localhost:5173
+    volumes:
+      - ./.docker-data/nexus:/app/.qodo
+    security_opt:
+      - seccomp=unconfined
+      - label=disable
+    ports:
+      - "3302:3002"
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+      args:
+        SERVICE: worker
+    environment:
+      NEXUS_URL: http://nexus:3002
+      WORKER_NAME: dev-worker
+      WORKER_TOKEN: dev-shared-token
+      WORKER_HEARTBEAT_MS: 5000
+      AUTO_RESTART_SHELL: "true"
+    depends_on:
+      - nexus
+    security_opt:
+      - seccomp=unconfined
+      - label=disable

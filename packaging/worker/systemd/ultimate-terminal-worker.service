@@ -3,6 +3,8 @@ Description=Ultimate Terminal Worker
 Documentation=https://github.com/ultimate-terminal/ultimate-terminal
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -10,8 +12,6 @@ EnvironmentFile=/etc/ultimate-terminal/worker.env
 ExecStart=/usr/bin/ultimate-terminal-worker
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 # Security hardening (relaxed for terminal access)
 NoNewPrivileges=false
