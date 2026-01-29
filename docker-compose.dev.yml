@@ -21,7 +21,7 @@ services:
       - seccomp=unconfined
       - label=disable
     ports:
-      - "3302:3002"
+      - "3002:3002"
 
   worker:
     build:
