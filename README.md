@@ -9,20 +9,9 @@ A distributed terminal system allowing you to control and view your devices from
 
 ## 📦 Generated Installers
 
-All installers have been successfully built and verified on this system (Fedora Linux):
-
 | Component | Platform | Location | Description |
 |-----------|----------|----------|-------------|
 | **Worker** | Linux | `worker/bin/worker-linux` | Standalone binary. Copy to any VPS/PC and run. |
-| **Client** | Linux | `client/release/Ultimate Terminal-1.0.0.AppImage` | Desktop app. Make executable and run. |
-| **Client** | Android | `client/android/app/build/outputs/apk/debug/app-debug.apk` | Install on your phone (enable unknown sources). |
-| **Client** | Windows | `client/release/Ultimate Terminal Setup 1.0.0.exe` | Windows Installer (Validated via Wine). |
-
-## Virtualization & Testing (KVM/Wine)
-
-- **Wine:** Installed. Used to build and test the Windows executable.
-- **KVM/Virt-Manager:** Installed.
-  - To test Windows fully: Open `virt-manager`, create a new VM using a Windows ISO, and copy the `.exe` installer to it.
 
 ## Development Setup
 
@@ -53,6 +42,8 @@ Build .deb packages for Nexus and Worker (systemd + config included):
 npm run package:deb
 ```
 Artifacts are written to `dist/packages/`.
+
+The web client builds to `client/dist` and is bundled into the Nexus package.
 
 ## Docker Smoke Test (.deb)
 

@@ -1,6 +1,6 @@
 # Ultimate Terminal - Project Overview
 
-**Ultimate Terminal** is a distributed terminal system that allows users to control and view shell sessions on remote devices (Workers) via a central relay server (Nexus) using a unified Client interface (Web, Desktop, Mobile).
+**Ultimate Terminal** is a distributed terminal system that allows users to control and view shell sessions on remote devices (Workers) via a central relay server (Nexus) using a web Client interface.
 
 ## 🏗 Architecture
 
@@ -18,8 +18,8 @@ The project acts as a monorepo with three main workspaces:
     *   **Function:** Connects to Nexus, spawns a local PTY (Pseudo-Terminal) shell (e.g., bash), executes commands received from Nexus, and streams stdout/stderr back.
 
 3.  **Client (`/client`)**
-    *   **Role:** The user interface.
-    *   **Tech:** React, Vite, TypeScript, Xterm.js, Electron (Desktop), Capacitor (Mobile).
+    *   **Role:** The web user interface.
+    *   **Tech:** React, Vite, TypeScript, Xterm.js.
     *   **Function:** Connects to Nexus, lists available Workers, and renders an interactive terminal session using Xterm.js.
 
 ## 🚀 Getting Started
@@ -55,12 +55,6 @@ You typically need three terminal instances running simultaneously:
     ```
     *   Access at: `http://localhost:5173`
 
-### Desktop Development (Electron)
-To run the client as a desktop application:
-```bash
-npm run electron:dev --workspace=client
-```
-
 ## 📦 Building & Packaging
 
 ### Worker (Standalone Binary)
@@ -70,19 +64,10 @@ npm run package --workspace=worker
 # Output: worker/bin/worker-linux
 ```
 
-### Client (Electron Desktop App)
-Builds the Electron app for the current OS.
+### Client (Web)
+Builds the web UI to `client/dist` and is served by Nexus in production packaging.
 ```bash
-npm run electron:build --workspace=client
-# Output: client/release/
-```
-
-### Client (Android)
-The project is configured with Capacitor.
-```bash
-cd client
-npx cap open android
-# Use Android Studio to build/run the APK
+npm run build --workspace=client
 ```
 
 ## 🛠 Development Conventions
@@ -108,4 +93,3 @@ npx cap open android
 *   `nexus/src/index.ts`: Main server entry point (socket logic).
 *   `worker/src/index.ts`: Main worker logic (pty spawning).
 *   `client/src/App.tsx`: Main React component containing the Terminal UI and socket logic.
-*   `client/electron/main.ts`: Electron main process setup.
