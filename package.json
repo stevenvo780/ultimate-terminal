@@ -12,8 +12,11 @@
     "start:worker": "npm run start --workspace=worker",
     "start:client": "npm run dev --workspace=client",
     "package:deb": "bash packaging/build.sh --deb",
+    "package:deb:worker": "bash packaging/build.sh --deb worker",
+    "package:deb:nexus": "bash packaging/build.sh --deb nexus",
     "package:rpm": "bash packaging/build.sh --rpm",
     "package:all": "bash packaging/build.sh --all",
+    "docker:deb:smoke": "bash scripts/deb-docker-smoke.sh",
     "test:smoke": "vitest run tests/e2e.test.ts tests/multi-client.test.ts"
   },
   "devDependencies": {

@@ -1,0 +1,19 @@
+FROM debian:unstable
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl passwd \
+  && rm -rf /var/lib/apt/lists/*
+
+# Avoid systemd hard dependency during package install inside containers.
+RUN printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl \
+  && chmod +x /usr/bin/systemctl
+
+COPY dist/packages/ultimate-terminal-nexus_*.deb /tmp/
+RUN dpkg -i /tmp/ultimate-terminal-nexus_*.deb
+
+ENV PORT=3002
+WORKDIR /var/lib/ultimate-terminal
+USER utnexus
+
+EXPOSE 3002
+CMD ["/usr/bin/ultimate-terminal-nexus"]

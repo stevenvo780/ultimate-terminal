@@ -1,0 +1,18 @@
+FROM debian:unstable
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates passwd \
+  && rm -rf /var/lib/apt/lists/*
+
+# Avoid systemd hard dependency during package install inside containers.
+RUN printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl \
+  && chmod +x /usr/bin/systemctl
+
+COPY dist/packages/ultimate-terminal-worker_*.deb /tmp/
+RUN dpkg -i /tmp/ultimate-terminal-worker_*.deb
+
+ENV NEXUS_URL=http://nexus:3002
+ENV WORKER_NAME=deb-worker
+ENV WORKER_TOKEN=dev-shared-token
+
+CMD ["/usr/bin/ultimate-terminal-worker"]

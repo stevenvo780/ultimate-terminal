@@ -1,0 +1,31 @@
+services:
+  nexus:
+    build:
+      context: .
+      dockerfile: docker/deb/Dockerfile.nexus
+    environment:
+      PORT: 3002
+      NEXUS_JWT_SECRET: dev-jwt-secret
+      ADMIN_PASSWORD: "dev-change-me"
+      WORKER_TOKEN: dev-shared-token
+      CLIENT_ORIGIN: "*"
+      ALLOW_UNAUTHENTICATED_WORKERS: "false"
+    ports:
+      - "13002:3002"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3002/api/auth/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/deb/Dockerfile.worker
+    environment:
+      NEXUS_URL: http://nexus:3002
+      WORKER_NAME: deb-worker
+      WORKER_TOKEN: dev-shared-token
+    depends_on:
+      nexus:
+        condition: service_healthy

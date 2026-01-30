@@ -54,6 +54,13 @@ npm run package:deb
 ```
 Artifacts are written to `dist/packages/`.
 
+## Docker Smoke Test (.deb)
+
+Build the .deb packages and launch Nexus + Worker using the packages inside containers:
+```bash
+npm run docker:deb:smoke
+```
+
 ## Configuration (env)
 - Copy `.env.example` to `.env` and adjust as needed.
 - Important:
