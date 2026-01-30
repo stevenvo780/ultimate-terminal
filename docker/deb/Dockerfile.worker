@@ -11,8 +11,4 @@ RUN printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl \
 COPY dist/packages/ultimate-terminal-worker_*.deb /tmp/
 RUN dpkg -i /tmp/ultimate-terminal-worker_*.deb
 
-ENV NEXUS_URL=http://nexus:3002
-ENV WORKER_NAME=deb-worker
-ENV WORKER_TOKEN=dev-shared-token
-
 CMD ["/usr/bin/ultimate-terminal-worker"]

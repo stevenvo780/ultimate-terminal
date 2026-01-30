@@ -11,7 +11,7 @@ services:
       CLIENT_ORIGIN: "*"
       ALLOW_UNAUTHENTICATED_WORKERS: "false"
     ports:
-      - "13002:3002"
+      - "${HOST_PORT:-13002}:3002"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3002/api/auth/status"]
       interval: 5s

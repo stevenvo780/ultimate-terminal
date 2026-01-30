@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Ultimate Terminal</string>
-    <string name="title_activity_main">Ultimate Terminal</string>
-    <string name="package_name">com.ultimate.terminal</string>
-    <string name="custom_url_scheme">com.ultimate.terminal</string>
-</resources>

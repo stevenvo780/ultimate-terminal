@@ -60,6 +60,7 @@ Build the .deb packages and launch Nexus + Worker using the packages inside cont
 ```bash
 npm run docker:deb:smoke
 ```
+By default, Nexus is exposed on `http://localhost:13002` (override with `HOST_PORT`).
 
 ## Configuration (env)
 - Copy `.env.example` to `.env` and adjust as needed.
