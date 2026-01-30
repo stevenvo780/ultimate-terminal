@@ -31,13 +31,12 @@ setupNativeModulePaths();
 import * as pty from 'node-pty';
 
 const NEXUS_URL = process.env.NEXUS_URL || 'http://localhost:3002';
-const WORKER_NAME = process.env.WORKER_NAME || os.hostname();
-const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
+const API_KEY = process.env.API_KEY || process.env.WORKER_TOKEN || ''; 
 const HEARTBEAT_MS = Number(process.env.WORKER_HEARTBEAT_MS || 5000);
 const AUTO_RESTART_SHELL = process.env.AUTO_RESTART_SHELL !== 'false';
 
-if (!WORKER_TOKEN) {
-  console.warn('[Worker] No WORKER_TOKEN provided. Registration will be rejected by Nexus.');
+if (!API_KEY) {
+  console.warn('[Worker] No API_KEY provided. Registration will likely be rejected by Nexus.');
 }
 
 console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
@@ -79,13 +78,13 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 function connect() {
   socket = io(NEXUS_URL, {
     reconnection: false,
-    auth: { type: 'worker', workerToken: WORKER_TOKEN }
+    auth: { type: 'worker', apiKey: API_KEY }
   });
 
   socket.on('connect', () => {
     console.log('[Worker] Connected to Nexus.');
     retryDelay = 1000; // Reset backoff
-    socket.emit('register', { type: 'worker', name: WORKER_NAME, workerToken: WORKER_TOKEN });
+    
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(() => {
       if (socket.connected) {

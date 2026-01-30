@@ -19,11 +19,8 @@ if [ ! -f /etc/ultimate-terminal/worker.env ]; then
 # Nexus server URL (required)
 NEXUS_URL=http://localhost:3002
 
-# Worker name (defaults to hostname)
-# WORKER_NAME=my-worker
-
-# Worker authentication token (must match WORKER_TOKEN on Nexus)
-WORKER_TOKEN=
+# Worker authentication key (Generated in Nexus)
+API_KEY=
 
 # Heartbeat interval in milliseconds
 # WORKER_HEARTBEAT_MS=5000
@@ -42,11 +39,12 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║         Ultimate Terminal Worker installed!                  ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
-echo "║  1. Edit configuration:                                      ║"
+echo "║  1. Configure your API Key:                                  ║"
 echo "║     sudo nano /etc/ultimate-terminal/worker.env              ║"
 echo "║                                                              ║"
 echo "║  2. Start the service:                                       ║"
 echo "║     sudo systemctl start ultimate-terminal-worker            ║"
+
 echo "║                                                              ║"
 echo "║  3. Check status:                                            ║"
 echo "║     sudo systemctl status ultimate-terminal-worker           ║"
