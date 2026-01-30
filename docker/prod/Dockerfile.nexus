@@ -13,7 +13,6 @@ RUN dpkg -i /tmp/ultimate-terminal-nexus_*.deb
 
 ENV PORT=3002
 WORKDIR /var/lib/ultimate-terminal
-USER utnexus
 
 EXPOSE 3002
 CMD ["/usr/bin/ultimate-terminal-nexus"]

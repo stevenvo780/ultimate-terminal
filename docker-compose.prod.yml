@@ -1,0 +1,48 @@
+services:
+  nexus:
+    build:
+      context: .
+      dockerfile: docker/prod/Dockerfile.nexus
+    environment:
+      PORT: 3002
+      NEXUS_JWT_SECRET: ${NEXUS_JWT_SECRET:-dev-jwt-secret}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-dev-change-me}
+      WORKER_TOKEN: ${WORKER_TOKEN:-dev-shared-token}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:13003}
+      ALLOW_UNAUTHENTICATED_WORKERS: "false"
+    ports:
+      - "${NEXUS_PORT:-13002}:3002"
+    volumes:
+      - ./.docker-data/nexus:/var/lib/ultimate-terminal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3002/api/auth/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/prod/Dockerfile.worker
+    environment:
+      NEXUS_URL: http://nexus:3002
+      WORKER_NAME: ${WORKER_NAME:-docker-worker}
+      WORKER_TOKEN: ${WORKER_TOKEN:-dev-shared-token}
+    depends_on:
+      nexus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  client:
+    build:
+      context: .
+      dockerfile: docker/prod/Dockerfile.client
+      args:
+        VITE_NEXUS_URL: ${VITE_NEXUS_URL:-http://localhost:13002}
+    ports:
+      - "${CLIENT_PORT:-13003}:80"
+    depends_on:
+      nexus:
+        condition: service_healthy
+    restart: unless-stopped

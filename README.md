@@ -45,13 +45,22 @@ Artifacts are written to `dist/packages/`.
 
 The web client builds to `client/dist` and is bundled into the Nexus package.
 
-## Docker Smoke Test (.deb)
+## Docker Deploy (3 servicios)
 
-Build the .deb packages and launch Nexus + Worker using the packages inside containers:
+Build .deb packages and deploy Nexus + Worker + Client using Docker:
 ```bash
-npm run docker:deb:smoke
+npm run docker:deploy
 ```
-By default, Nexus is exposed on `http://localhost:13002` (override with `HOST_PORT`).
+
+Validate stack:
+```bash
+npm run docker:test
+```
+
+Defaults:
+- Nexus: `http://localhost:13002` (`NEXUS_PORT`)
+- Client: `http://localhost:13003` (`CLIENT_PORT`)
+If you change `NEXUS_PORT`, also set `VITE_NEXUS_URL` for the client build.
 
 ## Configuration (env)
 - Copy `.env.example` to `.env` and adjust as needed.

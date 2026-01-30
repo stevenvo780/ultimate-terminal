@@ -16,8 +16,9 @@
     "package:deb:nexus": "bash packaging/build.sh --deb nexus",
     "package:rpm": "bash packaging/build.sh --rpm",
     "package:all": "bash packaging/build.sh --all",
-    "docker:deb:smoke": "bash scripts/deb-docker-smoke.sh",
-    "test:smoke": "vitest run tests/e2e.test.ts tests/multi-client.test.ts"
+    "docker:deploy": "bash scripts/docker-deploy.sh",
+    "docker:test": "bash scripts/docker-test.sh",
+    "test:e2e": "vitest run tests/e2e.test.ts tests/multi-client.test.ts"
   },
   "devDependencies": {
     "@types/node": "^25.0.6",

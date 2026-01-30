@@ -1,0 +1,25 @@
+FROM node:20-bookworm-slim AS build
+
+WORKDIR /app
+
+COPY client/package.json client/package.json
+COPY client/tsconfig.json client/tsconfig.json
+COPY client/tsconfig.app.json client/tsconfig.app.json
+COPY client/tsconfig.node.json client/tsconfig.node.json
+COPY client/vite.config.ts client/vite.config.ts
+COPY client/eslint.config.mjs client/eslint.config.mjs
+COPY client/index.html client/index.html
+COPY client/public client/public
+COPY client/src client/src
+
+WORKDIR /app/client
+RUN npm install --no-fund --no-audit
+
+ARG VITE_NEXUS_URL
+ENV VITE_NEXUS_URL=${VITE_NEXUS_URL}
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/client/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

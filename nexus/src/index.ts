@@ -5,7 +5,6 @@ import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -57,19 +56,17 @@ const io = new Server(httpServer, {
   },
 });
 
-// Database setup
 const dataDir = path.resolve(process.cwd(), '.qodo');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, 'nexus.db');
 
 // Use system native binding if available (for packaged binary), otherwise default
-const dbOptions = existsSync(SYSTEM_NATIVE_BINDING) 
-  ? { nativeBinding: SYSTEM_NATIVE_BINDING } 
+const dbOptions = existsSync(SYSTEM_NATIVE_BINDING)
+  ? { nativeBinding: SYSTEM_NATIVE_BINDING }
   : {};
 const db = new Database(dbPath, dbOptions);
 db.pragma('journal_mode = WAL');
 
-// Create tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS auth (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -95,21 +92,15 @@ db.exec(`
   );
 `);
 
-const auditFilePath = path.join(dataDir, 'audit.log');
 
-// In-memory sessions store
 let sharedSessions: Map<string, SharedSession> = new Map();
 const MAX_OUTPUT_CHARS = 50000;
 const SESSION_SAVE_DEBOUNCE_MS = 2000;
 let sessionSaveTimer: NodeJS.Timeout | null = null;
 
-// Track clients connected to each session with their viewport sizes
-// sessionId -> Map<clientSocketId, {cols, rows}>
 const sessionClients: Map<string, Map<string, { cols: number; rows: number }>> = new Map();
-// Track current PTY size for each session
 const sessionPtySizes: Map<string, { cols: number; rows: number }> = new Map();
 
-// Calculate the maximum size needed for a session based on all connected clients
 function getMaxSessionSize(sessionId: string): { cols: number; rows: number } {
   const clients = sessionClients.get(sessionId);
   if (!clients || clients.size === 0) {
@@ -120,7 +111,6 @@ function getMaxSessionSize(sessionId: string): { cols: number; rows: number } {
     maxCols = Math.max(maxCols, size.cols);
     maxRows = Math.max(maxRows, size.rows);
   });
-  // Ensure at least minimal valid dimensions
   return { cols: Math.max(2, maxCols), rows: Math.max(2, maxRows) };
 }
 
@@ -239,7 +229,6 @@ function deleteSessionFromDb(sessionId: string) {
 }
 
 function scheduleSessionSave(session: SharedSession) {
-  // Debounce writes per session
   if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
   sessionSaveTimer = setTimeout(() => {
     saveSessionToDb(session);
@@ -412,11 +401,9 @@ io.on('connection', (socket: Socket) => {
       if (socket.data.role !== 'client') return;
       console.log(`Client registered: ${socket.id}`);
       socket.emit('worker-list', serializeWorkers());
-      // Client will request session-list via 'get-session-list' after processing workers
     }
   });
 
-  // Session management events
   socket.on('create-session', (data: { id: string; workerName: string; workerKey: string; displayName: string }) => {
     if (socket.data.role !== 'client') return;
     const session: SharedSession = {
@@ -437,8 +424,7 @@ io.on('connection', (socket: Socket) => {
     if (socket.data.role !== 'client') return;
     const session = sharedSessions.get(data.sessionId);
     if (session) {
-      // Find the worker for this session and tell it to kill the PTY
-      const worker = Array.from(workers.values()).find(w => 
+      const worker = Array.from(workers.values()).find(w =>
         normalizeWorkerKey(w.name) === session.workerKey
       );
       if (worker) {
@@ -515,19 +501,12 @@ io.on('connection', (socket: Socket) => {
     if (socket.data.role !== 'client') return;
     const worker = workers.get(data.workerId);
     if (!worker || !data.sessionId) return;
-    
-    // Track this client's viewport size for the session
     if (!sessionClients.has(data.sessionId)) {
       sessionClients.set(data.sessionId, new Map());
     }
     sessionClients.get(data.sessionId)!.set(socket.id, { cols: data.cols, rows: data.rows });
-    
-    // Calculate max size needed across all clients viewing this session
     const maxSize = getMaxSessionSize(data.sessionId);
     const currentPtySize = sessionPtySizes.get(data.sessionId) || { cols: 80, rows: 24 };
-    
-    // Resize PTY if dimensions changed
-    // We update if the effective size across all clients has changed
     if (maxSize.cols !== currentPtySize.cols || maxSize.rows !== currentPtySize.rows) {
       sessionPtySizes.set(data.sessionId, maxSize);
       
@@ -542,7 +521,6 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // Client joining a session - track their viewport
   socket.on('join-session', (data: { sessionId: string; cols: number; rows: number }) => {
     if (socket.data.role !== 'client') return;
     if (!sessionClients.has(data.sessionId)) {
@@ -552,22 +530,17 @@ io.on('connection', (socket: Socket) => {
     console.log(`[Nexus] Client ${socket.id.slice(-6)} joined session ${data.sessionId.slice(-8)} with viewport ${data.cols}x${data.rows}`);
   });
 
-  // Client leaving a session
   socket.on('leave-session', (data: { sessionId: string }) => {
     if (socket.data.role !== 'client') return;
     const clients = sessionClients.get(data.sessionId);
     if (clients) {
       clients.delete(socket.id);
-      // If no more clients, we could shrink the PTY, but we'll leave it for now
-      // to avoid disrupting any background processes
       console.log(`[Nexus] Client ${socket.id.slice(-6)} left session ${data.sessionId.slice(-8)}`);
     }
   });
 
   socket.on('output', (data: { clientId?: string; sessionId?: string; output: string }) => {
     if (socket.data.role !== 'worker') return;
-    
-    // Store output in shared session
     if (data.sessionId) {
       const session = sharedSessions.get(data.sessionId);
       if (session) {
@@ -576,8 +549,6 @@ io.on('connection', (socket: Socket) => {
         scheduleSessionSave(session);
       }
     }
-    
-    // Broadcast to all clients so everyone sees the output
     io.emit('output', {
       workerId: socket.id,
       sessionId: data.sessionId,
@@ -591,21 +562,17 @@ io.on('connection', (socket: Socket) => {
       workers.delete(socket.id);
       broadcastWorkerList();
     } else if (socket.data.role === 'client') {
-      // Remove client from all session tracking
       sessionClients.forEach((clients, sessionId) => {
         if (clients.has(socket.id)) {
           clients.delete(socket.id);
           console.log(`[Nexus] Client ${socket.id.slice(-6)} removed from session ${sessionId.slice(-8)} tracking`);
-          
-          // Recalculate and potentially shrink PTY if this was the largest client
           if (clients.size > 0) {
             const newMax = getMaxSessionSize(sessionId);
             const currentSize = sessionPtySizes.get(sessionId);
             if (currentSize && (newMax.cols < currentSize.cols || newMax.rows < currentSize.rows)) {
-              // Find the worker for this session and resize
               const session = sharedSessions.get(sessionId);
               if (session) {
-                const worker = Array.from(workers.values()).find(w => 
+                const worker = Array.from(workers.values()).find(w =>
                   normalizeWorkerKey(w.name) === session.workerKey
                 );
                 if (worker) {
@@ -623,8 +590,6 @@ io.on('connection', (socket: Socket) => {
           }
         }
       });
-      
-      // Notify all workers that this client has disconnected
       console.log(`Client disconnected: ${socket.id}`);
       workers.forEach((worker) => {
         io.to(worker.socketId).emit('client-disconnect', { clientId: socket.id });
@@ -636,24 +601,16 @@ io.on('connection', (socket: Socket) => {
 
 const PORT = process.env.PORT || 3002;
 
-// Serve static client files - check multiple locations
-// Prefer the fresh Vite build (client/dist) before falling back to packaged assets
 const clientPaths = [
-  // Workspace build output when running from monorepo root
   path.resolve(process.cwd(), 'client/dist'),
-  // Workspace build output when the cwd is the nexus workspace (workspaces change cwd)
   path.resolve(process.cwd(), '../client/dist'),
-  // Local dev fallback
   path.resolve(process.cwd(), 'public'),
-  // System package locations
   '/usr/share/ultimate-terminal/public',
-  // Relative to compiled dist folder
   path.resolve(__dirname, '../public'),
 ];
 const clientDistPath = clientPaths.find(p => existsSync(p));
 if (clientDistPath) {
   app.use(express.static(clientDistPath));
-  // SPA fallback - serve index.html for all non-API routes
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       return next();
@@ -663,7 +620,6 @@ if (clientDistPath) {
   console.log(`Serving client from ${clientDistPath}`);
 }
 
-// Load sessions from SQLite and start server
 sharedSessions = loadSessionsFromDb();
 console.log(`[Nexus] Loaded ${sharedSessions.size} sessions from database`);
 

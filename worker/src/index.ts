@@ -28,14 +28,12 @@ const setupNativeModulePaths = () => {
 
 setupNativeModulePaths();
 
-// Now import node-pty after setting up paths
 import * as pty from 'node-pty';
 
 const NEXUS_URL = process.env.NEXUS_URL || 'http://localhost:3002';
 const WORKER_NAME = process.env.WORKER_NAME || os.hostname();
 const WORKER_TOKEN = process.env.WORKER_TOKEN || '';
 const HEARTBEAT_MS = Number(process.env.WORKER_HEARTBEAT_MS || 5000);
-// Auto-restart shell on exit for persistent sessions (like tmux)
 const AUTO_RESTART_SHELL = process.env.AUTO_RESTART_SHELL !== 'false';
 
 if (!WORKER_TOKEN) {
@@ -44,16 +42,10 @@ if (!WORKER_TOKEN) {
 
 console.log(`[Worker] Connecting to Nexus at ${NEXUS_URL}...`);
 
-// Connection state management
 let socket: Socket;
-// Map of sessionId -> PTY instance (persistent sessions, not tied to clientId)
 const sessionShells = new Map<string, pty.IPty>();
-// Track session dimensions for respawn (last active state)
 const sessionDimensions = new Map<string, { cols: number; rows: number }>();
-// Track individual client viewports: sessionId -> clientId -> { cols, rows }
 const sessionClientViewports = new Map<string, Map<string, { cols: number; rows: number }>>();
-
-// Track sessions that were explicitly killed (not to be respawned)
 const killedSessions = new Set<string>();
 
 const normalizeSessionId = (sessionId?: string) => {
@@ -61,11 +53,9 @@ const normalizeSessionId = (sessionId?: string) => {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 };
 
-// Calculate common denominator dimensions for a session
 function calculateSessionDimensions(sessionId: string): { cols: number; rows: number } | null {
   const viewports = sessionClientViewports.get(sessionId);
   if (!viewports || viewports.size === 0) {
-    // If no active clients, return current dimensions or default
     return sessionDimensions.get(sessionId) || { cols: 80, rows: 30 };
   }
 
@@ -118,7 +108,6 @@ function connect() {
     scheduleReconnect();
   });
 
-  // Track newly created shells to ignore initial \n (backward compat with old clients)
   const newlyCreatedShells = new Set<string>();
 
   socket.on('execute', (data: { clientId: string; sessionId?: string; command: string }) => {
@@ -129,26 +118,16 @@ function connect() {
     }
     
     let shell = sessionShells.get(sessionId);
-    const isNewShell = !shell;
     if (!shell) {
-      // Use stored dimensions if available (from a prior resize event)
       const dims = sessionDimensions.get(sessionId) || { cols: 80, rows: 30 };
       shell = createShellForSession(sessionId, dims.cols, dims.rows);
       sessionShells.set(sessionId, shell);
       newlyCreatedShells.add(sessionId);
-      // Remove from newly created set after a short delay
       setTimeout(() => newlyCreatedShells.delete(sessionId), 500);
     }
-    
-    // Update the viewport for this client implicitly acting as a keep-alive/registration
-    // This handles cases where a client executes without resizing first
     if (!sessionClientViewports.has(sessionId)) {
       sessionClientViewports.set(sessionId, new Map());
     }
-    // We don't have dims here, but we assume current shell dims if not set
-    // This is optional optimization, resizing usually happens immediately after connect
-    
-    // Skip the initial \n that old clients send - the shell already generated a prompt
     if (newlyCreatedShells.has(sessionId) && data.command === '\n') {
       console.log(`[Worker] Skipping initial \\n for new shell ${sessionId.slice(-8)}`);
       return;
@@ -158,74 +137,54 @@ function connect() {
       shell.write(data.command);
     }
   });
-  
-  // Handle terminal resize events from client
+
   socket.on('resize', (data: { clientId: string; sessionId?: string; cols: number; rows: number }) => {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) return;
-    
-    // 1. Update this client's viewport
     if (!sessionClientViewports.has(sessionId)) {
       sessionClientViewports.set(sessionId, new Map());
     }
     sessionClientViewports.get(sessionId)!.set(data.clientId, { cols: data.cols, rows: data.rows });
-
-    // 2. Calculate optimal dimensions (intersection of all viewports)
     const targetDims = calculateSessionDimensions(sessionId);
-    // If we have valid dims, use them; otherwise fallback to data
     const finalCols = targetDims ? targetDims.cols : data.cols;
     const finalRows = targetDims ? targetDims.rows : data.rows;
-
-    // Update stored authoritative dimensions
     sessionDimensions.set(sessionId, { cols: finalCols, rows: finalRows });
-    
     let shell = sessionShells.get(sessionId);
     if (shell) {
-      // Resize existing shell
       try {
-        // Only resize if different to avoid spamming pty
         if (shell.cols !== finalCols || shell.rows !== finalRows) {
           shell.resize(finalCols, finalRows);
         }
       } catch (err) {
-        // Ignore resize errors if shell is dead
+        console.warn(`[Worker] Resize error for session ${sessionId.slice(-8)}:`, err);
       }
     } else {
-      // Create shell with correct dimensions on first resize
       console.log(`[Worker] Creating shell for session ${sessionId.slice(-8)} on resize (${finalCols}x${finalRows})`);
       shell = createShellForSession(sessionId, finalCols, finalRows);
       sessionShells.set(sessionId, shell);
     }
   });
 
-  // Handle explicit session close from client
   socket.on('kill-session', (data: { sessionId: string }) => {
     const sessionId = normalizeSessionId(data.sessionId);
     if (!sessionId) return;
-    
-    // Mark as explicitly killed to prevent auto-respawn
     killedSessions.add(sessionId);
     sessionDimensions.delete(sessionId);
     sessionClientViewports.delete(sessionId);
-    
     const shell = sessionShells.get(sessionId);
     if (shell) {
       console.log(`[Worker] Killing PTY for session ${sessionId} (explicit close)`);
       try {
         shell.kill();
       } catch (e) {
-        // Ignore errors during cleanup
+        console.warn(`[Worker] Error killing PTY for session ${sessionId}:`, e);
       }
       sessionShells.delete(sessionId);
     }
   });
 
-  // Client disconnect - sessions persist, don't kill PTYs
   socket.on('client-disconnect', (data: { clientId: string }) => {
     console.log(`[Worker] Client ${data.clientId} disconnected - sessions persist`);
-    // Sessions are persistent, we don't kill PTYs when clients disconnect
-
-    // Remove this client's viewports from all sessions and re-optimize dimensions
     for (const [sessionId, viewports] of sessionClientViewports.entries()) {
       if (viewports.delete(data.clientId)) {
         const newDims = calculateSessionDimensions(sessionId);
@@ -237,7 +196,7 @@ function connect() {
               shell.resize(newDims.cols, newDims.rows);
               console.log(`[Worker] Resizing session ${sessionId.slice(-8)} after client disconnect: ${newDims.cols}x${newDims.rows}`);
             } catch (e) {
-              // ignore
+              console.warn(`[Worker] Resize error after disconnect:`, e);
             }
           }
         }
@@ -258,7 +217,6 @@ function scheduleReconnect() {
   retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
 }
 
-// Get user info for the target user (configurable or auto-detect)
 interface UserInfo {
   username: string;
   uid: number;
@@ -268,14 +226,10 @@ interface UserInfo {
 }
 
 function getTargetUser(): UserInfo | null {
-  // Priority 1: Explicit RUN_AS_USER in env
   const runAsUser = process.env.RUN_AS_USER;
-  
   try {
     const passwd = fs.readFileSync('/etc/passwd', 'utf-8');
     const lines = passwd.split('\n').filter(l => l.trim());
-    
-    // If RUN_AS_USER is specified, find that user
     if (runAsUser) {
       for (const line of lines) {
         const parts = line.split(':');
@@ -291,15 +245,11 @@ function getTargetUser(): UserInfo | null {
       }
       console.warn(`[Worker] RUN_AS_USER="${runAsUser}" not found, falling back to auto-detect`);
     }
-    
-    // Priority 2: Find first regular user (UID >= 1000, excluding nobody/nogroup)
     for (const line of lines) {
       const parts = line.split(':');
       const uid = parseInt(parts[2]);
       const username = parts[0];
-      
-      // Skip system users and special accounts
-      if (uid >= 1000 && uid < 65534 && 
+      if (uid >= 1000 && uid < 65534 &&
           !['nobody', 'nogroup', 'nfsnobody'].includes(username)) {
         return {
           username: parts[0],
@@ -313,11 +263,9 @@ function getTargetUser(): UserInfo | null {
   } catch (e) {
     console.error('[Worker] Failed to read /etc/passwd:', e);
   }
-  
   return null;
 }
 
-// Cache target user on startup
 const targetUser = getTargetUser();
 if (targetUser) {
   console.log(`[Worker] Will spawn shells as user: ${targetUser.username} (uid=${targetUser.uid}, shell=${targetUser.shell})`);
@@ -330,41 +278,27 @@ function createShellForSession(
   cols: number = 80,
   rows: number = 30,
 ): pty.IPty {
-  // Store dimensions for potential respawn
   sessionDimensions.set(sessionId, { cols, rows });
-  
   let shellCmd: string;
   let shellArgs: string[] = [];
   let shellEnv: Record<string, string | undefined>;
   let shellCwd: string;
-  let shellUid: number | undefined;
-  let shellGid: number | undefined;
-  
   if (targetUser) {
-    // Use 'su' to run a login shell as the target user
-    // Using -l (login) and -s to specify shell explicitly
-    // The '-' makes it a login shell which sources profile
     shellCmd = '/bin/su';
     shellArgs = ['-l', targetUser.username, '-s', targetUser.shell];
     shellCwd = targetUser.home;
-    
-    // Minimal env - su will set up the rest from user's profile
     shellEnv = {
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       LANG: process.env.LANG || 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL || 'en_US.UTF-8',
-      // Disable zsh partial line indicator (%) that appears when output doesn't end with newline
       PROMPT_EOL_MARK: '',
     };
-    
     console.log(`[Worker] Spawning PTY for session ${sessionId} as ${targetUser.username} (${targetUser.shell}) with dimensions ${cols}x${rows}...`);
   } else {
-    // Fallback: run as current user with basic shell
     const shells = ['/usr/bin/zsh', '/bin/zsh', '/usr/bin/bash', '/bin/bash', '/bin/sh'];
     shellCmd = shells.find(s => fs.existsSync(s)) || 'bash';
     shellCwd = process.env.HOME || '/tmp';
-    
     shellEnv = {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
@@ -372,7 +306,6 @@ function createShellForSession(
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor'
     };
-    
     console.log(`[Worker] Spawning PTY for session ${sessionId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
   }
 
@@ -386,41 +319,28 @@ function createShellForSession(
 
   shell.onData((data) => {
     if (socket && socket.connected) {
-      // Broadcast to all clients - nexus will route to appropriate clients
-      socket.emit('output', {
-        sessionId,
-        output: data,
-      });
+      socket.emit('output', { sessionId, output: data });
     }
   });
 
   shell.onExit(({ exitCode, signal }) => {
     console.log(`[Worker] Shell for session ${sessionId} exited (Code: ${exitCode}, Signal: ${signal}).`);
     sessionShells.delete(sessionId);
-    
-    // Check if this session was explicitly killed - if so, don't respawn
     if (killedSessions.has(sessionId)) {
       killedSessions.delete(sessionId);
       sessionDimensions.delete(sessionId);
-      // Notify nexus that this session's shell has exited permanently
       if (socket && socket.connected) {
         socket.emit('session-shell-exited', { sessionId, exitCode, signal });
       }
       return;
     }
-    
-    // Auto-restart shell for persistent sessions (like tmux behavior)
     if (AUTO_RESTART_SHELL && socket && socket.connected) {
       const dims = sessionDimensions.get(sessionId) || { cols: 80, rows: 30 };
       console.log(`[Worker] Auto-respawning shell for session ${sessionId}...`);
-      
-      // Small delay before respawn to avoid rapid cycling
       setTimeout(() => {
         if (!killedSessions.has(sessionId) && socket && socket.connected) {
           const newShell = createShellForSession(sessionId, dims.cols, dims.rows);
           sessionShells.set(sessionId, newShell);
-          
-          // Send a message to client indicating shell was restarted
           socket.emit('output', {
             sessionId,
             output: `\r\n\x1b[33m[Shell exited with code ${exitCode}. New shell started.]\x1b[0m\r\n\r\n`,
@@ -429,7 +349,6 @@ function createShellForSession(
       }, 500);
     } else {
       sessionDimensions.delete(sessionId);
-      // Notify nexus that this session's shell has exited
       if (socket && socket.connected) {
         socket.emit('session-shell-exited', { sessionId, exitCode, signal });
       }

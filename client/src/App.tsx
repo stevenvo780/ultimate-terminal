@@ -118,7 +118,8 @@ function App() {
     if (!value) return fallback;
     try {
       return JSON.parse(value) as T;
-    } catch {
+    } catch (err) {
+      console.warn('Failed to parse stored value:', err);
       return fallback;
     }
   };
@@ -159,9 +160,6 @@ function App() {
     if (sameKey.length === 0) return null;
     return sameKey.find((worker) => worker.status !== 'offline') || sameKey[0];
   };
-
-  // Sessions are now restored from server only via 'session-list' event
-  // hydrateSavedSessions was removed - server is source of truth
 
   const rebindSessionsToWorkers = (list: Worker[]) => {
     setSessions((prev) =>
@@ -279,11 +277,9 @@ function App() {
     activeSessionRef.current = activeSessionId;
   }, [activeSessionId]);
 
-  // Track previous session to emit leave-session
   const prevActiveSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Emit leave-session for previous session
     if (prevActiveSessionRef.current && prevActiveSessionRef.current !== activeSessionId && socketRef.current) {
       socketRef.current.emit('leave-session', { sessionId: prevActiveSessionRef.current });
     }
@@ -302,8 +298,6 @@ function App() {
               : session,
           ),
         );
-        
-        // Emit join-session with current viewport size
         if (socketRef.current && activeSession.terminal) {
           socketRef.current.emit('join-session', {
             sessionId: activeSessionId,
@@ -408,7 +402,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // Remove grid slots that no longer exist
     setGridSessionIds((prev) => prev.filter((id) => sessionsRef.current.some((s) => s.id === id)));
   }, [sessions]);
 
@@ -426,7 +419,6 @@ function App() {
     newSocket.on('connect', () => {
       setConnectionState('connected');
       newSocket.emit('register', { type: 'client' });
-      // Rehidrata la sesion activa al reconectar
       setTimeout(() => resumeActiveSession(), 100);
     });
 
@@ -438,10 +430,6 @@ function App() {
       workersRef.current = list;
       setWorkers(list);
       rebindSessionsToWorkers(list);
-      // Sessions are now restored from server only, not from localStorage
-      // hydrateSavedSessions(list); -- removed, server is source of truth
-      
-      // Request session list from server now that we have workers
       newSocket.emit('get-session-list');
 
       const preferredWorker = lastWorkerRef.current
@@ -464,7 +452,6 @@ function App() {
       }
     });
 
-    // Handle server-side session list (for syncing across clients)
     newSocket.on('session-list', (serverSessions: Array<{
       id: string;
       workerName: string;
@@ -473,14 +460,11 @@ function App() {
       createdAt: number;
       lastActiveAt: number;
     }>) => {
-      // Restore sessions from server that we don't have locally
       serverSessions.forEach(ss => {
         const existsLocally = sessionsRef.current.some(s => s.id === ss.id);
         if (!existsLocally) {
-          // Find worker for this session using workersRef (not state which may be stale)
           const worker = workersRef.current.find(w => normalizeWorkerKey(w.name) === ss.workerKey);
           if (worker) {
-            // Request output from server and create session
             newSocket.emit('get-session-output', { sessionId: ss.id }, (output: string) => {
               createNewSession(worker, {
                 sessionId: ss.id,
@@ -494,8 +478,6 @@ function App() {
           }
         }
       });
-      
-      // Also remove sessions that no longer exist on server
       const serverSessionIds = new Set(serverSessions.map(s => s.id));
       const sessionsToRemove = sessionsRef.current.filter(s => !serverSessionIds.has(s.id));
       sessionsToRemove.forEach(session => {
@@ -507,7 +489,6 @@ function App() {
       }
     });
 
-    // Handle session closed by another client
     newSocket.on('session-closed', (data: { sessionId: string }) => {
       const session = sessionsRef.current.find(s => s.id === data.sessionId);
       if (session) {
@@ -637,15 +618,11 @@ function App() {
     const displayName = options?.displayName || worker.name;
     const createdAt = options?.createdAt || Date.now();
     const lastActiveAt = options?.lastActiveAt || Date.now();
-    
-    // Create terminal container
     const container = document.createElement('div');
     container.className = 'terminal-wrapper';
     container.style.display = 'none';
     container.dataset.sessionId = sessionId;
     terminalContainerRef.current.appendChild(container);
-
-    // Create terminal
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"MesloLGS NF", "Fira Code", "JetBrains Mono", "Roboto Mono", "Monaco", "Courier New", monospace',
@@ -666,8 +643,6 @@ function App() {
     term.loadAddon(clipboardAddon);
     term.open(container);
     fitAddon.fit();
-
-    // Handle terminal input
     term.onData((data) => {
       trackInputForHistory(sessionId, workerKey, data);
       if (socketRef.current) {
@@ -678,8 +653,6 @@ function App() {
         });
       }
     });
-
-    // Handle resize
     const handleResize = () => {
       const isVisible = container.offsetParent !== null && container.clientWidth > 0 && container.clientHeight > 0;
       if (!isVisible) return;
@@ -720,8 +693,6 @@ function App() {
     if (options?.focus !== false) {
       setActiveSessionId(sessionId);
     }
-
-    // Notify server about new session (unless restoring from server)
     if (!options?.sessionId && socketRef.current) {
       socketRef.current.emit('create-session', {
         id: sessionId,
@@ -730,9 +701,6 @@ function App() {
         displayName,
       });
     }
-
-    // Initial resize to set proper dimensions
-    // Note: We don't send an initial \n anymore - the shell already generates a prompt on startup
     setTimeout(() => {
       handleResize();
     }, 100);
@@ -742,7 +710,6 @@ function App() {
 
   const closeSession = (sessionId: string) => {
     setGridSessionIds((prev) => prev.filter((id) => id !== sessionId));
-    // Notify server
     if (socketRef.current) {
       socketRef.current.emit('close-session', { sessionId });
     }
@@ -782,7 +749,6 @@ function App() {
     if (!session) return;
     const newName = window.prompt('Nuevo nombre para la sesion', session.displayName);
     if (newName && newName.trim().length > 0) {
-      // Notify server
       if (socketRef.current) {
         socketRef.current.emit('rename-session', { sessionId, displayName: newName.trim() });
       }
@@ -798,7 +764,6 @@ function App() {
     const workerKey = normalizeWorkerKey(worker.name);
     localStorage.setItem(LAST_WORKER_KEY, workerKey);
     lastWorkerRef.current = workerKey;
-    // Always create a new session
     return createNewSession(worker);
   };
 
@@ -808,7 +773,6 @@ function App() {
     const workerKey = normalizeWorkerKey(worker.name);
     localStorage.setItem(LAST_WORKER_KEY, workerKey);
     lastWorkerRef.current = workerKey;
-    // Focus existing session for this worker, or create one if none exists
     const existing = sessionsRef.current.find((session) => session.workerKey === workerKey);
     if (existing) {
       setActiveSessionId(existing.id);
@@ -966,7 +930,6 @@ function App() {
     setGridSessionIds((prev) => {
       const next = [...prev];
       while (next.length < 4) next.push('');
-      // Remove duplicates first
       for (let i = 0; i < next.length; i += 1) {
         if (i !== slotIndex && next[i] === sessionId) {
           next[i] = '';
@@ -1035,7 +998,6 @@ function App() {
     event.preventDefault();
   };
 
-  // Safety cleanup for stuck drag states (touch devices/missed events)
   useEffect(() => {
     const cleanupDrag = () => {
       if (draggingSessionId) {
@@ -1043,10 +1005,7 @@ function App() {
         setShowDropOverlay(false);
       }
     };
-
-    // If drag end is missed by the specific element, catch it globally
     window.addEventListener('dragend', cleanupDrag);
-    // Touch/Pointer events for tablets where DnD might be flaky
     window.addEventListener('pointerup', cleanupDrag);
     window.addEventListener('touchend', cleanupDrag);
 
@@ -1058,7 +1017,6 @@ function App() {
   }, [draggingSessionId]);
 
   useEffect(() => {
-    // Show/hide terminal containers based on active session
     const visibleIds = new Set<string>();
     
     if (layoutMode === 'single') {
@@ -1127,18 +1085,12 @@ function App() {
       }
       if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
         if (layoutMode === 'single') {
-             // Smart switching? No, just go to Quad for now as it's the superset
              setLayoutMode('quad');
         }
-        
-        // Navigation logic needs to strictly follow the slots
-        // 0 1
-        // 2 3
         const currentSlot = gridSessionIds.findIndex(id => id === activeSessionId);
         let nextSlot = currentSlot;
 
         if (currentSlot === -1) {
-             // Not in grid, maybe set to 0
              setActiveSessionId(gridSessionIds[0]);
              return;
         }
@@ -1151,9 +1103,6 @@ function App() {
         const targetId = gridSessionIds[nextSlot];
         if (targetId) {
             setActiveSessionId(targetId);
-        } else {
-            // Empy slot? Maybe focus it explicitly (would require Focus state separate from activeSessionId)
-            // For now do nothing
         }
         event.preventDefault();
         return;
@@ -1722,8 +1671,6 @@ function App() {
               </button>
             )}
           </div>
-          
-          {/* Render Empty Slot Placeholders to maintain Grid Structure */}
           {layoutMode !== 'single' && (
             <>
               {(layoutMode === 'split-vertical' ? [0, 1] : [0, 1, 2, 3]).map((idx) => {
@@ -1753,8 +1700,6 @@ function App() {
               {workers.length === 0 && <p className="muted">No hay workers conectados en este momento.</p>}
             </div>
           )}
-          
-          {/* Invisible Overlay for Dragging if needed - mostly handled by placeholders now but let's keep it for zone switching if Single mode */}
           {showDropOverlay && layoutMode === 'single' && (
             <div className="drop-overlay" onDragOver={handleDragOverHotspot} onDrop={handleDragEnd}>
               {['Izquierda', 'Derecha', 'Abajo', 'Arriba'].map((label, idx) => (
