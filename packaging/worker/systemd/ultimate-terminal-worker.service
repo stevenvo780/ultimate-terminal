@@ -1,6 +1,6 @@
 [Unit]
 Description=Ultimate Terminal Worker
-Documentation=https://github.com/ultimate-terminal/ultimate-terminal
+Documentation=https://github.com/stevenvo780/ultimate-terminal
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60

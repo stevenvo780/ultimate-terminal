@@ -3,7 +3,7 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Ultimate Terminal Nexus Server
 License:        MIT
-URL:            https://github.com/ultimate-terminal/ultimate-terminal
+URL:            https://github.com/stevenvo780/ultimate-terminal
 
 %description
 Central hub for Ultimate Terminal that manages workers,
@@ -14,9 +14,21 @@ mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/systemd/system
 mkdir -p %{buildroot}/etc/ultimate-terminal
 mkdir -p %{buildroot}/var/lib/ultimate-terminal
+mkdir -p %{buildroot}/usr/share/ultimate-terminal/public
+mkdir -p %{buildroot}/usr/lib/ultimate-terminal/prebuilds/linux-x64
 
 install -m 755 %{_sourcedir}/ultimate-terminal-nexus %{buildroot}/usr/bin/
 install -m 644 %{_sourcedir}/ultimate-terminal-nexus.service %{buildroot}/usr/lib/systemd/system/
+
+# Install client assets
+if [ -d %{_sourcedir}/public ]; then
+    cp -r %{_sourcedir}/public/* %{buildroot}/usr/share/ultimate-terminal/public/
+fi
+
+# Install native sqlite module
+if [ -f %{_sourcedir}/prebuilds/linux-x64/better_sqlite3.node ]; then
+    install -m 755 %{_sourcedir}/prebuilds/linux-x64/better_sqlite3.node %{buildroot}/usr/lib/ultimate-terminal/prebuilds/linux-x64/
+fi
 
 %pre
 if ! id -u utnexus >/dev/null 2>&1; then
@@ -66,6 +78,8 @@ systemctl daemon-reload || true
 /usr/bin/ultimate-terminal-nexus
 /usr/lib/systemd/system/ultimate-terminal-nexus.service
 %dir /var/lib/ultimate-terminal
+/usr/share/ultimate-terminal/public
+/usr/lib/ultimate-terminal/prebuilds/linux-x64/better_sqlite3.node
 
 %changelog
 * Fri Jan 17 2026 Ultimate Terminal Team <support@ultimate-terminal.io> - 1.0.0-1

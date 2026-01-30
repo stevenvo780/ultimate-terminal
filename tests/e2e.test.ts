@@ -17,7 +17,7 @@ describe('Ultimate Terminal E2E', () => {
   let clientSocket: any;
 
   beforeAll(async () => {
-    await fs.rm(path.resolve(__dirname, '..', '.qodo', 'auth.json'), { force: true });
+    await fs.rm(path.resolve(__dirname, '..', '.qodo'), { force: true, recursive: true });
 
     nexusProcess = spawn('npx', ['ts-node', 'nexus/src/index.ts'], {
       env: {

@@ -3,7 +3,7 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Ultimate Terminal Worker Agent
 License:        MIT
-URL:            https://github.com/ultimate-terminal/ultimate-terminal
+URL:            https://github.com/stevenvo780/ultimate-terminal
 
 %description
 Persistent terminal worker that connects to Ultimate Terminal Nexus.

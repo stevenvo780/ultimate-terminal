@@ -46,6 +46,14 @@ All installers have been successfully built and verified on this system (Fedora 
    npm run start:client
    ```
 
+## Debian (.deb) Packages
+
+Build .deb packages for Nexus and Worker (systemd + config included):
+```bash
+npm run package:deb
+```
+Artifacts are written to `dist/packages/`.
+
 ## Configuration (env)
 - Copy `.env.example` to `.env` and adjust as needed.
 - Important:

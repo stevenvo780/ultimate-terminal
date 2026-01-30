@@ -25,24 +25,31 @@ timeout 15 bash -c 'until curl -s http://localhost:3002 > /dev/null; do sleep 0.
 echo "Iniciando Worker..."
 setsid npm run start:worker > worker.log 2>&1 < /dev/null &
 
-# 4. Iniciar Client (Frontend) -> DESACTIVADO: Nexus ya sirve los estáticos en ../client/dist
-# echo "Iniciando Client..."
-# setsid npm run start:client > client.log 2>&1 < /dev/null &
+# 4. Iniciar Client (Frontend) opcional
+START_CLIENT="${START_CLIENT:-false}"
+CLIENT_URL="http://localhost:5173"
+NEXUS_URL="http://localhost:3002"
 
-# Esperar a que el Cliente inicie
-echo "Esperando a Client..."
-timeout 15 bash -c 'until curl -s http://localhost:5173 > /dev/null; do sleep 0.5; done'
+if [ "$START_CLIENT" = "true" ]; then
+  echo "Iniciando Client..."
+  setsid npm run start:client > client.log 2>&1 < /dev/null &
 
-echo "--- Verificación Final ---"
-if curl -s -I http://localhost:5173 | grep "200 OK"; then
-    echo "✅ Cliente ONLINE: http://localhost:5173"
-else
-    echo "❌ Error: El cliente no responde."
-    cat client.log | tail -n 10
+  echo "Esperando a Client..."
+  timeout 15 bash -c "until curl -s $CLIENT_URL > /dev/null; do sleep 0.5; done"
 fi
 
-if curl -s -I http://localhost:3002 | grep "404"; then
-    echo "✅ Nexus ONLINE: http://localhost:3002"
+echo "--- Verificación Final ---"
+if [ "$START_CLIENT" = "true" ]; then
+  if curl -s -I "$CLIENT_URL" | grep "200 OK"; then
+      echo "✅ Cliente ONLINE: $CLIENT_URL"
+  else
+      echo "❌ Error: El cliente no responde."
+      cat client.log | tail -n 10
+  fi
+fi
+
+if curl -s -I "$NEXUS_URL/api/auth/status" | grep "200 OK"; then
+    echo "✅ Nexus ONLINE: $NEXUS_URL"
 else
     echo "❌ Error: Nexus no responde."
     cat nexus.log | tail -n 10

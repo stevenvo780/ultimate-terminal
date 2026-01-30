@@ -10,7 +10,7 @@ services:
     environment:
       PORT: 3002
       NEXUS_JWT_SECRET: dev-jwt-secret
-      ADMIN_PASSWORD: "zxcvFDSA90%"
+      ADMIN_PASSWORD: "dev-change-me"
       WORKER_TOKEN: dev-shared-token
       NEXUS_SETUP_TOKEN: dev-setup-token
       ALLOW_UNAUTHENTICATED_WORKERS: "false"

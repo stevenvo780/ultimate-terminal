@@ -7,7 +7,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/dist/packages"
-VERSION="1.0.0"
+VERSION="${UT_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    VERSION=$(node -p "require('${PROJECT_ROOT}/package.json').version" 2>/dev/null || echo "1.0.0")
+fi
+CLIENT_DIST_DIR="$PROJECT_ROOT/client/dist"
+CLIENT_PUBLIC_DIR="$PROJECT_ROOT/nexus/public"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -44,22 +49,18 @@ build_binaries() {
     
     # Build worker
     cd "$PROJECT_ROOT/worker"
-    npm run build 2>/dev/null || true
     npm run package
     log_success "Worker binary built"
     
     # Build nexus  
     cd "$PROJECT_ROOT/nexus"
-    npm run build 2>/dev/null || true
     npm run package
     log_success "Nexus binary built"
     
-    # Build client and copy to nexus/public
+    # Build client (static assets)
     cd "$PROJECT_ROOT/client"
     npm run build
-    rm -rf "$PROJECT_ROOT/nexus/public"
-    cp -r dist "$PROJECT_ROOT/nexus/public"
-    log_success "Client built and copied to nexus/public"
+    log_success "Client built"
 }
 
 build_deb() {
@@ -98,9 +99,19 @@ build_deb() {
     
     # Copy public folder and native modules for nexus
     if [ "$component" = "nexus" ]; then
-        mkdir -p "$pkg_dir/usr/share/ultimate-terminal"
-        if [ -d "$PROJECT_ROOT/nexus/public" ]; then
-            cp -r "$PROJECT_ROOT/nexus/public" "$pkg_dir/usr/share/ultimate-terminal/"
+        local client_assets=""
+        if [ -d "$CLIENT_DIST_DIR" ]; then
+            client_assets="$CLIENT_DIST_DIR"
+        elif [ -d "$CLIENT_PUBLIC_DIR" ]; then
+            client_assets="$CLIENT_PUBLIC_DIR"
+        fi
+
+        if [ -n "$client_assets" ]; then
+            mkdir -p "$pkg_dir/usr/share/ultimate-terminal/public"
+            cp -r "$client_assets"/. "$pkg_dir/usr/share/ultimate-terminal/public/"
+            log_info "Included client assets from $client_assets"
+        else
+            log_warn "Client assets not found. Skipping static files."
         fi
         
         # Copy better-sqlite3 native module
@@ -114,6 +125,7 @@ build_deb() {
     
     # Copy DEBIAN control files
     cp "$SCRIPT_DIR/${component}/debian/control" "$pkg_dir/DEBIAN/"
+    sed -i "s/^Version: .*/Version: ${VERSION}/" "$pkg_dir/DEBIAN/control"
     
     for script in postinst prerm postrm; do
         if [ -f "$SCRIPT_DIR/${component}/debian/$script" ]; then
@@ -149,6 +161,7 @@ build_rpm() {
     cp "$PROJECT_ROOT/${component}/bin/${component}-linux" "$rpm_dir/SOURCES/${pkg_name}"
     cp "$SCRIPT_DIR/${component}/systemd/${pkg_name}.service" "$rpm_dir/SOURCES/"
     cp "$SCRIPT_DIR/${component}/rpm/${pkg_name}.spec" "$rpm_dir/SPECS/"
+    sed -i "s/^Version: .*/Version: ${VERSION}/" "$rpm_dir/SPECS/${pkg_name}.spec"
     
     # Copy node-pty native module for worker
     if [ "$component" = "worker" ]; then
@@ -164,8 +177,19 @@ build_rpm() {
     
     # Copy public folder and native modules for nexus
     if [ "$component" = "nexus" ]; then
-        if [ -d "$PROJECT_ROOT/nexus/public" ]; then
-            cp -r "$PROJECT_ROOT/nexus/public" "$rpm_dir/SOURCES/"
+        local client_assets=""
+        if [ -d "$CLIENT_DIST_DIR" ]; then
+            client_assets="$CLIENT_DIST_DIR"
+        elif [ -d "$CLIENT_PUBLIC_DIR" ]; then
+            client_assets="$CLIENT_PUBLIC_DIR"
+        fi
+
+        if [ -n "$client_assets" ]; then
+            mkdir -p "$rpm_dir/SOURCES/public"
+            cp -r "$client_assets"/. "$rpm_dir/SOURCES/public/"
+            log_info "Included client assets from $client_assets"
+        else
+            log_warn "Client assets not found. Skipping static files."
         fi
         
         # Copy better-sqlite3 native module

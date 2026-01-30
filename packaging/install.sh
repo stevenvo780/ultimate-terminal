@@ -4,7 +4,14 @@ set -e
 # Quick installation script for development/testing
 # Downloads and installs the latest packages
 
-REPO_URL="https://github.com/ultimate-terminal/ultimate-terminal"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+VERSION="${UT_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    VERSION=$(node -p "require('${PROJECT_ROOT}/package.json').version" 2>/dev/null || echo "1.0.0")
+fi
+
+REPO_URL="https://github.com/stevenvo780/ultimate-terminal"
 RELEASES_URL="$REPO_URL/releases/latest/download"
 
 RED='\033[0;31m'
@@ -40,16 +47,16 @@ install_worker() {
             if [ -f "$1" ]; then
                 sudo dpkg -i "$1"
             else
-                curl -LO "$RELEASES_URL/ultimate-terminal-worker_1.0.0_amd64.deb"
-                sudo dpkg -i ultimate-terminal-worker_1.0.0_amd64.deb
+                curl -LO "$RELEASES_URL/ultimate-terminal-worker_${VERSION}_amd64.deb"
+                sudo dpkg -i "ultimate-terminal-worker_${VERSION}_amd64.deb"
             fi
             ;;
         fedora|rhel|centos|rocky|alma)
             if [ -f "$1" ]; then
                 sudo rpm -i "$1"
             else
-                curl -LO "$RELEASES_URL/ultimate-terminal-worker-1.0.0-1.x86_64.rpm"
-                sudo rpm -i ultimate-terminal-worker-1.0.0-1.x86_64.rpm
+                curl -LO "$RELEASES_URL/ultimate-terminal-worker-${VERSION}-1.x86_64.rpm"
+                sudo rpm -i "ultimate-terminal-worker-${VERSION}-1.x86_64.rpm"
             fi
             ;;
         arch|manjaro)
@@ -75,16 +82,16 @@ install_nexus() {
             if [ -f "$1" ]; then
                 sudo dpkg -i "$1"
             else
-                curl -LO "$RELEASES_URL/ultimate-terminal-nexus_1.0.0_amd64.deb"
-                sudo dpkg -i ultimate-terminal-nexus_1.0.0_amd64.deb
+                curl -LO "$RELEASES_URL/ultimate-terminal-nexus_${VERSION}_amd64.deb"
+                sudo dpkg -i "ultimate-terminal-nexus_${VERSION}_amd64.deb"
             fi
             ;;
         fedora|rhel|centos|rocky|alma)
             if [ -f "$1" ]; then
                 sudo rpm -i "$1"
             else
-                curl -LO "$RELEASES_URL/ultimate-terminal-nexus-1.0.0-1.x86_64.rpm"
-                sudo rpm -i ultimate-terminal-nexus-1.0.0-1.x86_64.rpm
+                curl -LO "$RELEASES_URL/ultimate-terminal-nexus-${VERSION}-1.x86_64.rpm"
+                sudo rpm -i "ultimate-terminal-nexus-${VERSION}-1.x86_64.rpm"
             fi
             ;;
         *)
@@ -106,7 +113,7 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  $0 worker                              # Download and install worker"
-    echo "  $0 worker ./ut-worker_1.0.0_amd64.deb  # Install from local file"
+    echo "  $0 worker ./ultimate-terminal-worker_${VERSION}_amd64.deb  # Install from local file"
     echo "  $0 both                                # Install both from releases"
 }
 
