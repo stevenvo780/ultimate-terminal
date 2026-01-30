@@ -13,7 +13,6 @@ export class WorkerController {
     const { name } = req.body;
     if (!name) { res.status(400).json({error: 'Name required'}); return; }
     
-    // Create logic
     const worker = WorkerModel.create(req.user.userId, name);
     res.json(worker);
   }
@@ -22,7 +21,6 @@ export class WorkerController {
     if (!req.user) { res.status(401).send(); return; }
     const { workerId, targetUserId, permission } = req.body;
     
-    // Check if user is owner
     const worker = WorkerModel.findById(workerId);
     if (!worker) { res.status(404).json({error: 'Worker not found'}); return; }
     

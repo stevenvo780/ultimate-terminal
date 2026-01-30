@@ -15,7 +15,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   
   if (!authHeader) {
      res.status(401).json({ error: 'No token provided' });
-     return; // Explicit return to avoid void mismatch
+     return;
   }
 
   const token = authHeader.split(' ')[1]; // Bearer <token>

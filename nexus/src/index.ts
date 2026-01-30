@@ -6,7 +6,7 @@ import app from './app';
 import { initSocket } from './socket';
 import { initDatabase } from './config/database';
 import { UserModel } from './models/user.model';
-import { WorkerModel } from './models/worker.model'; // Import WorkerModel
+import { WorkerModel } from './models/worker.model';
 
 const PORT = process.env.PORT || 3002;
 

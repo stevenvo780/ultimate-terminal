@@ -23,7 +23,6 @@ export class AuthController {
           res.status(400).json({ error: 'Username and password required' });
           return;
       }
-      // Simple validation
       if (password.length < 6) {
           res.status(400).json({ error: 'Password too short' });
           return;

@@ -18,6 +18,16 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/workers', workerRoutes);
 
+// Serve Install Script
+app.get('/install.sh', (req, res) => {
+    res.sendFile(path.join(__dirname, 'scripts/install-worker.sh'));
+});
+
+// Serve Downloads
+app.get('/api/downloads/latest/worker-linux.deb', (req, res) => {
+    res.status(404).send('Not implemented: release download');
+});
+
 // Static files (Client)
 const clientPaths = [
   path.resolve(process.cwd(), 'client/dist'),

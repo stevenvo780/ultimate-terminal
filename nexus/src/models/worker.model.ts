@@ -3,7 +3,7 @@ import db from '../config/database';
 import { generateApiKey } from '../utils/crypto';
 
 export interface Worker {
-  id: string; // Worker usually generates its own ID or we assign one
+  id: string;
   owner_id: number;
   name: string;
   api_key: string;

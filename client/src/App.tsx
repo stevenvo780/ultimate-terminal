@@ -6,12 +6,19 @@ import { ClipboardAddon } from '@xterm/addon-clipboard';
 import '@xterm/xterm/css/xterm.css';
 import './App.css';
 
+interface User {
+  userId: number;
+  username: string;
+  isAdmin: boolean;
+}
+
 interface Worker {
   id: string;
   socketId: string;
   name: string;
   status?: 'online' | 'offline';
   lastSeen?: string;
+  api_key?: string;
 }
 
 interface TerminalSession {
@@ -49,7 +56,6 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
-// In production (served from nexus), use relative URL. In dev, use env or localhost.
 const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || (import.meta.env.PROD ? '' : 'http://localhost:3002');
 const AUTH_KEY = 'ut-token';
 const LAST_WORKER_KEY = 'ut-last-worker';
@@ -71,6 +77,11 @@ function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [showAddWorkerModal, setShowAddWorkerModal] = useState<boolean>(false);
+  const [newWorkerName, setNewWorkerName] = useState('');
+  const [createdWorker, setCreatedWorker] = useState<Worker | null>(null);
+
   const [needsSetup, setNeedsSetup] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
@@ -257,6 +268,33 @@ function App() {
   };
 
   useEffect(() => {
+    const storedToken = localStorage.getItem(AUTH_KEY);
+    if (!storedToken) {
+      setNeedsSetup(true);
+      return;
+    }
+    setToken(storedToken);
+
+    // Try to restore user session
+    fetch(`${NEXUS_URL}/api/auth/me`, {
+       headers: { 'Authorization': `Bearer ${storedToken}` }
+    })
+    .then(res => {
+        if (!res.ok) throw new Error('Invalid token');
+        return res.json();
+    })
+    .then(data => {
+        setUser(data.user);
+        initSocket(storedToken);
+    })
+    .catch(() => {
+        setToken(null);
+        localStorage.removeItem(AUTH_KEY);
+        setNeedsSetup(true);
+    });
+  }, []);
+
+  useEffect(() => {
     socketRef.current = socket;
   }, [socket]);
 
@@ -419,36 +457,21 @@ function App() {
     newSocket.on('connect', () => {
       setConnectionState('connected');
       newSocket.emit('register', { type: 'client' });
-      setTimeout(() => resumeActiveSession(), 100);
     });
 
-    newSocket.on('reconnect_attempt', () => setConnectionState('reconnecting'));
-    newSocket.on('reconnect', () => setConnectionState('connected'));
-    newSocket.on('disconnect', () => setConnectionState('disconnected'));
+    newSocket.on('disconnect', () => {
+      setConnectionState('disconnected');
+    });
 
-    newSocket.on('worker-list', (list: Worker[]) => {
-      workersRef.current = list;
-      setWorkers(list);
-      rebindSessionsToWorkers(list);
-      newSocket.emit('get-session-list');
-
-      const preferredWorker = lastWorkerRef.current
-        ? list.find((w) => normalizeWorkerKey(w.name) === lastWorkerRef.current)
-        : null;
-
-      const activeSession = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
-      const resolvedActive = activeSession ? resolveWorkerForSession(activeSession, list) : null;
-      const activeWorkerOnline = resolvedActive ? resolvedActive.status !== 'offline' : false;
-
-      if (!activeWorkerOnline) {
-        if (preferredWorker) {
-          focusOrCreateSession(preferredWorker.id);
-        } else if (list.length > 0) {
-          const firstOnline = list.find((w) => w.status !== 'offline') || list[0];
-          focusOrCreateSession(firstOnline.id);
-        } else {
-          setActiveSessionId(null);
-        }
+    newSocket.on('reconnect', (attempt) => {
+      setConnectionState('connected');
+      const active = sessionsRef.current.find((s) => s.id === activeSessionRef.current);
+      if (active) {
+        newSocket.emit('join-session', {
+          sessionId: activeSessionRef.current,
+          cols: active.terminal.cols || 80,
+          rows: active.terminal.rows || 24,
+        });
       }
     });
 
@@ -725,34 +748,7 @@ function App() {
       schedulePersistSessions();
 
       // Filter out the closed session
-      const newSessions = prevSessions.filter(s => s.id !== sessionId);
-
-      // If closing active session, switch to another
-      if (activeSessionId === sessionId) {
-        if (newSessions.length > 0) {
-          setActiveSessionId(newSessions[newSessions.length - 1].id);
-        } else {
-          setActiveSessionId(null);
-        }
-      }
-
-      return newSessions;
-    });
-  };
-
-  const switchSession = (sessionId: string) => {
-    setActiveSessionId(sessionId);
-  };
-
-  const renameSession = (sessionId: string) => {
-    const session = sessionsRef.current.find((s) => s.id === sessionId);
-    if (!session) return;
-    const newName = window.prompt('Nuevo nombre para la sesion', session.displayName);
-    if (newName && newName.trim().length > 0) {
-      if (socketRef.current) {
-        socketRef.current.emit('rename-session', { sessionId, displayName: newName.trim() });
-      }
-      setSessions((prev) =>
+      const newSessions = prevSessions.filter(s => s
         prev.map((s) => (s.id === sessionId ? { ...s, displayName: newName.trim() } : s)),
       );
     }
@@ -945,8 +941,6 @@ function App() {
     assignGridSlot(nextEmptySlot(), sessionId);
   };
 
-
-
   const clearGrid = () => setGridSessionIds([]);
 
   const handleSessionDragStart = (sessionId: string, displayName: string) => (event: DragEvent<HTMLDivElement>) => {
@@ -977,8 +971,6 @@ function App() {
     setDraggingSessionId(null);
     setShowDropOverlay(false);
   };
-
-
 
   const handleDropOnHotspot = (hotspotIndex: number) => (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1674,7 +1666,7 @@ function App() {
           {layoutMode !== 'single' && (
             <>
               {(layoutMode === 'split-vertical' ? [0, 1] : [0, 1, 2, 3]).map((idx) => {
-                if (gridSessionIds[idx]) return null; // Session exists here (imperative)
+                if (gridSessionIds[idx]) return null;
                 return (
                   <div
                     key={`placeholder-${idx}`}

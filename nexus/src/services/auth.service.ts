@@ -27,8 +27,7 @@ export class AuthService {
     if (UserModel.findByUsername(username)) {
       throw new Error('Username already exists');
     }
-    // First user is admin automatically? Or maybe not. Let's make it manual for now.
-    // Actually, let's check if NO users exist, make the first one admin.
+    
     const isFirstUser = UserModel.findById(1) === undefined;
     const user = UserModel.create(username, password, isFirstUser);
     

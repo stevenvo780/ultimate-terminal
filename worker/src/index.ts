@@ -83,7 +83,7 @@ function connect() {
 
   socket.on('connect', () => {
     console.log('[Worker] Connected to Nexus.');
-    retryDelay = 1000; // Reset backoff
+    retryDelay = 1000;
     
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(() => {

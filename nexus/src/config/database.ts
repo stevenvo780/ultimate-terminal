@@ -48,7 +48,7 @@ export const initDatabase = () => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       worker_id TEXT NOT NULL,
       user_id INTEGER NOT NULL,
-      permission TEXT DEFAULT 'view', -- 'view', 'control', 'admin'
+      permission TEXT DEFAULT 'view',
       FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(worker_id, user_id)

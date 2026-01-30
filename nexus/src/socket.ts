@@ -12,10 +12,7 @@ interface SocketData {
 
 // In-memory state
 export const workers: Map<string, Worker & { socketId: string }> = new Map();
-// We can cache sessions in memory or query DB. Let's keep a cache for performance if needed, 
-// but for now let's rely on DB + memory for active connections.
 
-// Sessions map to keep track of outputs in memory (for performance vs writing to DB every char)
 interface ActiveSession {
   id: string;
   workerId: string;
@@ -28,7 +25,7 @@ const activeSessions: Map<string, ActiveSession> = new Map();
 export const initSocket = (httpServer: any) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: '*', // Configure properly in production
+      origin: '*',
       methods: ['GET', 'POST'],
     },
   });
@@ -70,9 +67,6 @@ export const initSocket = (httpServer: any) => {
 
     // Worker Life-cycle
     if (data.role === 'worker' && data.workerId) {
-        // Broadcast online status?
-        // In this new model, clients poll or we push to relevant clients.
-        // For simplicity, let's just log.
         console.log(`Worker ${data.workerId} connected`);
     }
 
@@ -103,7 +97,7 @@ export const initSocket = (httpServer: any) => {
        io.to(worker.socketId).emit('execute', {
            clientId: socket.id,
            command: msg.command,
-           sessionId: 'default' // Simple session management for now
+           sessionId: 'default'
        });
     });
     
@@ -111,13 +105,6 @@ export const initSocket = (httpServer: any) => {
     socket.on('output', (msg: { sessionId?: string; output: string }) => {
         if (data.role !== 'worker' || !data.workerId) return;
         
-        // We broadcast to all clients who are listening to this worker/session
-        // Ideally we use rooms: `io.to(`session:${sessionId}`).emit(...)`
-        // For now, simple broadcast to everyone? No, security risk.
-        // We need to know which clients are watching.
-        
-        // This part requires a bit more protocol design. 
-        // Let's assume clients join a room "worker:ID".
         io.to(`worker:${data.workerId}`).emit('output', {
             workerId: data.workerId,
             data: msg.output

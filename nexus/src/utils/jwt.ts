@@ -1,7 +1,6 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
-// Get secret from env or generate a random one (warn in production)
 const rawJwtSecret = (process.env.NEXUS_JWT_SECRET || '').trim();
 
 function resolveJwtSecret(secret: string) {
@@ -9,7 +8,7 @@ function resolveJwtSecret(secret: string) {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('NEXUS_JWT_SECRET must be set in production.');
   }
-  return 'dev-secret-do-not-use-in-prod'; // Fallback for dev to avoid random restarts invalidating tokens
+  return 'dev-secret-do-not-use-in-prod';
 }
 
 export const JWT_SECRET = resolveJwtSecret(rawJwtSecret);
