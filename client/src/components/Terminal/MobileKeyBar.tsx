@@ -163,6 +163,13 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
     }
   }, []);
 
+  // preventDefault on mousedown stops the button from stealing focus from the
+  // terminal's hidden input — without this, tapping a key closes the on-screen
+  // keyboard on iOS/Android. onClick still fires normally.
+  const preventFocusSteal = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+  }, []);
+
   if (!visible) return null;
 
   return (
@@ -174,6 +181,7 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
             <button
               key={combo.label}
               className="keybar-ctrl-combo"
+              onMouseDown={preventFocusSteal}
               onClick={() => handleCtrlCombo(combo.data)}
               type="button"
             >
@@ -192,6 +200,7 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
             <button
               key={keyId}
               className={`keybar-key ${isToggle ? 'toggle' : ''} ${isActive ? 'active' : ''}`}
+              onMouseDown={preventFocusSteal}
               onClick={() => handleKey(keyId)}
               onTouchStart={() => handleTouchStart(keyId)}
               onTouchEnd={handleTouchEnd}
@@ -210,6 +219,7 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
             <button
               key={keyId}
               className="keybar-key"
+              onMouseDown={preventFocusSteal}
               onClick={() => handleKey(keyId)}
               type="button"
             >
