@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Ultimate Terminal / TermiCoop — Worker universal installer (source build).
+# Ultimate Terminal — Worker universal installer (source build).
 #
 # Uso (curl pipe):
 #   curl -fsSL "$NEXUS_URL/install.sh" \
@@ -18,11 +18,11 @@ set -euo pipefail
 NEXUS_URL="${NEXUS_URL:-http://localhost:3002}"
 API_KEY="${1:-${API_KEY:-${WORKER_TOKEN:-}}}"
 WORKER_NAME="${WORKER_NAME:-$(hostname)}"
-REPO_OWNER="${TERMICOOP_REPO_OWNER:-stevenvo780}"
-REPO_NAME="${TERMICOOP_REPO_NAME:-TermiCoop}"
-REPO_URL="${TERMICOOP_REPO_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}.git}"
-REPO_REF="${TERMICOOP_REPO_REF:-main}"
-RELEASE_BASE_URL="${TERMICOOP_RELEASE_BASE_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download}"
+REPO_OWNER="${WORKER_REPO_OWNER:-stevenvo780}"
+REPO_NAME="${WORKER_REPO_NAME:-ultimate-terminal}"
+REPO_URL="${WORKER_REPO_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}.git}"
+REPO_REF="${WORKER_REPO_REF:-main}"
+RELEASE_BASE_URL="${RELEASE_BASE_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 USER_INSTALL="${USER_INSTALL:-0}"   # 1 = instala como systemd --user (sin sudo)
 PREFER_BINARY="${PREFER_BINARY:-1}"  # 1 = intenta .deb/.rpm de GitHub Releases primero
@@ -70,7 +70,7 @@ if [ -f /etc/os-release ]; then
 fi
 ARCH_RAW="$(uname -m || echo unknown)"
 
-echo "=== TermiCoop Worker installer ==="
+echo "=== Ultimate Terminal Worker installer ==="
 echo "Sistema:   $OS_ID $VERSION_ID ($ARCH_RAW)"
 echo "Nexus URL: $NEXUS_URL"
 echo "Worker:    $WORKER_NAME"
@@ -296,8 +296,8 @@ if [ "$USER_INSTALL" = "1" ]; then
   mkdir -p "$SERVICE_DIR"
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=TermiCoop / Ultimate Terminal Worker (user)
-Documentation=https://github.com/stevenvo780/TermiCoop
+Description=Ultimate Terminal Worker (user)
+Documentation=https://github.com/stevenvo780/ultimate-terminal
 After=default.target
 
 [Service]
@@ -335,8 +335,8 @@ else
     echo "==> Instalando servicio systemd (source build)..."
     $SUDO tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=TermiCoop / Ultimate Terminal Worker
-Documentation=https://github.com/stevenvo780/TermiCoop
+Description=Ultimate Terminal Worker
+Documentation=https://github.com/stevenvo780/ultimate-terminal
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60

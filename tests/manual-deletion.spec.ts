@@ -15,7 +15,7 @@ test.describe('Worker Deletion Manual Test', () => {
     test.beforeAll(async () => {
         try {
             // Reiniciar servicios Docker para asegurar estado limpio
-            await execAsync(`docker compose -f /home/stev/Documentos/repos/Personal/TermiCoop/docker-compose.prod.yml restart nexus worker`);
+            await execAsync(`docker compose -f /home/stev/Documentos/repos/Personal/ultimate-terminal/docker-compose.prod.yml restart nexus worker`);
             await new Promise(r => setTimeout(r, 8000));
         } catch (e) {
             console.log('Error reiniciando servicios:', e);
@@ -32,7 +32,7 @@ test.describe('Worker Deletion Manual Test', () => {
     test.afterAll(async () => {
         try {
             // Recrear el entorno para futuros tests
-            await execAsync(`docker compose -f /home/stev/Documentos/repos/Personal/TermiCoop/docker-compose.prod.yml restart nexus worker`);
+            await execAsync(`docker compose -f /home/stev/Documentos/repos/Personal/ultimate-terminal/docker-compose.prod.yml restart nexus worker`);
             await new Promise(r => setTimeout(r, 5000));
         } catch (e) {
             console.error('Failed to restart services:', e);

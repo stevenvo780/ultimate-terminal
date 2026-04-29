@@ -114,7 +114,7 @@ export function LoginPage() {
         <div className="nav-inner">
           <div className="nav-brand">
             <Hexagon size={24} />
-            <span>TermiCoop</span>
+            <span>Ultimate Terminal</span>
           </div>
           <div className="nav-links">
             <button onClick={() => scrollTo(installRef)} className="nav-link">Instalar</button>
@@ -136,7 +136,7 @@ export function LoginPage() {
             <span className="hero-gradient">desde un solo lugar</span>
           </h1>
           <p className="hero-desc">
-            TermiCoop te permite acceder a terminales remotas de cualquier servidor,
+            Ultimate Terminal te permite acceder a terminales remotas de cualquier servidor,
             VPS o máquina en tu red — todo desde tu navegador, sin instalar nada en el cliente.
           </p>
           <div className="hero-actions">
@@ -168,7 +168,7 @@ export function LoginPage() {
 
       {/* ─── Features ─── */}
       <section className="features-section">
-        <h2 className="section-title">¿Por qué TermiCoop?</h2>
+        <h2 className="section-title">¿Por qué Ultimate Terminal?</h2>
         <p className="section-subtitle">Todo lo que necesitas para administrar tus servidores de forma remota.</p>
         <div className="features-grid">
           {FEATURES.map((f, i) => (
@@ -343,7 +343,7 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
                 </button>
               </div>
               <div className="install-docs-note">
-                <strong>Arch Linux:</strong> No hay paquete oficial. Usa la instalación rápida o compila desde fuente con el <a href="https://github.com/stevenvo780/TermiCoop" target="_blank" rel="noopener noreferrer">código fuente</a>.
+                <strong>Arch Linux:</strong> No hay paquete oficial. Usa la instalación rápida o compila desde fuente con el <a href="https://github.com/stevenvo780/ultimate-terminal" target="_blank" rel="noopener noreferrer">código fuente</a>.
               </div>
             </div>
           )}
@@ -379,7 +379,7 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
       {/* ─── Use Cases ─── */}
       <section className="use-cases-section">
         <h2 className="section-title">Casos de Uso</h2>
-        <p className="section-subtitle">TermiCoop se adapta a múltiples escenarios profesionales.</p>
+        <p className="section-subtitle">Ultimate Terminal se adapta a múltiples escenarios profesionales.</p>
         <div className="use-cases-grid">
           <div className="use-case-card">
             <div className="use-case-icon"><Cpu size={28} /></div>
@@ -409,7 +409,7 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
           <div className="use-case-card">
             <div className="use-case-icon"><Workflow size={28} /></div>
             <h3>Automatización</h3>
-            <p>Combina TermiCoop con tus flujos CI/CD. Ejecuta scripts de mantenimiento, verifica estados de servicios o realiza tareas programadas desde una interfaz web unificada.</p>
+            <p>Combina Ultimate Terminal con tus flujos CI/CD. Ejecuta scripts de mantenimiento, verifica estados de servicios o realiza tareas programadas desde una interfaz web unificada.</p>
           </div>
         </div>
       </section>
@@ -441,7 +441,7 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
           </details>
           <details className="faq-item">
             <summary><HelpCircle size={18} /> ¿Puedo auto-hospedar el nexus?</summary>
-            <p>Sí. TermiCoop es open source. Puedes desplegar tu propio nexus en tu infraestructura con Docker Compose o como paquete systemd. La documentación completa está en GitHub.</p>
+            <p>Sí. Ultimate Terminal es open source. Puedes desplegar tu propio nexus en tu infraestructura con Docker Compose o como paquete systemd. La documentación completa está en GitHub.</p>
           </details>
         </div>
       </section>
@@ -494,7 +494,7 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
           <button className="btn-hero-primary" onClick={openLoginModal}>
             Comenzar Gratis <ArrowRight size={18} />
           </button>
-          <a href="https://github.com/stevenvo780/TermiCoop" target="_blank" rel="noopener noreferrer" className="btn-hero-secondary">
+          <a href="https://github.com/stevenvo780/ultimate-terminal" target="_blank" rel="noopener noreferrer" className="btn-hero-secondary">
             Ver en GitHub <ChevronRight size={18} />
           </a>
         </div>
@@ -508,7 +508,7 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
           <div className="login-header">
             <div className="login-logo">
               <span className="logo-icon"><Hexagon /></span>
-              <h1>TermiCoop</h1>
+              <h1>Ultimate Terminal</h1>
             </div>
             <p className="login-subtitle">Inicia sesión o crea tu cuenta</p>
             <button className="login-close-btn" onClick={closeLoginModal} type="button" aria-label="Cerrar">×</button>
@@ -570,15 +570,15 @@ sudo systemctl status ultimate-terminal-worker`}</pre>
       <footer className="landing-footer">
         <div className="footer-inner">
           <div className="footer-brand">
-            <Hexagon size={20} /> TermiCoop
+            <Hexagon size={20} /> Ultimate Terminal
           </div>
           <div className="footer-links">
-            <a href="https://github.com/stevenvo780/TermiCoop" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://github.com/stevenvo780/ultimate-terminal" target="_blank" rel="noopener noreferrer">GitHub</a>
             <button onClick={() => scrollTo(installRef)}>Instalar</button>
             <button onClick={() => scrollTo(pricingRef)}>Planes</button>
             <button onClick={openLoginModal}>Iniciar Sesión</button>
           </div>
-          <p>© {new Date().getFullYear()} TermiCoop. Terminal remoto distribuido.</p>
+          <p>© {new Date().getFullYear()} Ultimate Terminal. Terminal remoto distribuido.</p>
         </div>
       </footer>
     </div>

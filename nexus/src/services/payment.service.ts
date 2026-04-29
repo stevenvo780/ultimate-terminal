@@ -121,7 +121,7 @@ export class PaymentService {
         items: [
           {
             id: plan.id,
-            title: `TermiCoop - Plan ${plan.name}`,
+            title: `Ultimate Terminal - Plan ${plan.name}`,
             description: plan.description,
             quantity: 1,
             unit_price: plan.price,
@@ -139,7 +139,7 @@ export class PaymentService {
         } : {}),
         notification_url: isHttps ? `${NEXUS_PUBLIC_URL}/api/payments/webhook` : undefined,
         external_reference: `user_${userId}_plan_${planId}_${Date.now()}`,
-        statement_descriptor: 'TermiCoop',
+        statement_descriptor: 'UltTerminal',
       },
     });
 

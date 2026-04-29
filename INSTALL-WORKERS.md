@@ -1,4 +1,4 @@
-# TermiCoop — Instrucciones para IA (Setup completo de Workers)
+# ultimate-terminal — Instrucciones para IA (Setup completo de Workers)
 
 > **Prompt para otra IA con acceso sudo en vpn-principal**
 > Fecha: 2025-07-11
@@ -105,8 +105,8 @@ ssh vpn-principal "curl -fsSL https://terminal.humanizar-dev.cloud/install.sh \
 | `NEXUS_URL` | `http://localhost:3002` | URL pública del nexus |
 | `WORKER_NAME` | `$(hostname)` | Nombre visible en la plataforma |
 | `NODE_MAJOR` | `22` | Versión mayor de Node a instalar si falta |
-| `TERMICOOP_REPO_URL` | `https://github.com/stevenvo780/TermiCoop.git` | Fallback si el nexus no sirve la fuente |
-| `TERMICOOP_REPO_REF` | `main` | Branch / tag a clonar |
+| `WORKER_REPO_URL` | `https://github.com/stevenvo780/ultimate-terminal.git` | Fallback si el nexus no sirve la fuente |
+| `WORKER_REPO_REF` | `main` | Branch / tag a clonar |
 
 ---
 

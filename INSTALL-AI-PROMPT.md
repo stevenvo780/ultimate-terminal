@@ -1,4 +1,4 @@
-# Prompt — Instalación de Workers TermiCoop (para IA con acceso SSH)
+# Prompt — Instalación de Workers ultimate-terminal (para IA con acceso SSH)
 
 > Pásale **todo este archivo** como input a la IA que tiene acceso SSH a los 10 hosts.
 > Última actualización: 2026-04-29 — instalador dual-path (.deb preferido, source fallback), commit `07d891e` en `main`.
@@ -11,7 +11,7 @@ Instalar / reinstalar el worker `ultimate-terminal-worker` en 10 hosts, conectá
 
 **Cómo funciona el instalador (dual-path):**
 
-1. **Path binario (preferido)** — intenta bajar el `.deb` desde la última GitHub Release pública (`https://github.com/stevenvo780/TermiCoop/releases/latest/download/ultimate-terminal-worker_<version>_<distro-version>_amd64_x86_64.deb`). Si la distro encaja con uno de los .deb publicados (Ubuntu 20.04 / 22.04 / 24.04, Debian 11/12/13, Kali, Mint, Pop), `dpkg -i` y listo.
+1. **Path binario (preferido)** — intenta bajar el `.deb` desde la última GitHub Release pública (`https://github.com/stevenvo780/ultimate-terminal/releases/latest/download/ultimate-terminal-worker_<version>_<distro-version>_amd64_x86_64.deb`). Si la distro encaja con uno de los .deb publicados (Ubuntu 20.04 / 22.04 / 24.04, Debian 11/12/13, Kali, Mint, Pop), `dpkg -i` y listo.
 2. **Smoke test** del binario `/usr/bin/ultimate-terminal-worker --help`. Si pasa → service ya está registrado por el .deb, solo se escribe `/etc/ultimate-terminal/worker.env` y se arranca.
 3. **Fallback automático a source build** si:
    - No existe Release todavía (404 → ver "Pre-requisito" abajo);
@@ -23,7 +23,7 @@ Todo eso es **automático**: el delegate AI solo ejecuta el one-liner.
 
 El instalador es:
 ```
-https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh
+https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh
 ```
 Funciona sin más en Ubuntu, Debian, Mint, Pop!_OS, Kali, Fedora, RHEL, CentOS, Rocky, Alma, Arch y Manjaro. Para `pc-stev` usa modo `USER_INSTALL=1` (servicio de usuario, sin sudo) — en ese modo siempre va por source build (los .deb instalan a `/usr/bin`, que requiere root).
 
@@ -54,14 +54,14 @@ A partir de ahí los hosts derivados de Debian/Ubuntu (8 de 10) usan el path bin
 **Plantilla genérica** (root/sudo, todos los hosts excepto `pc-stev`):
 ```bash
 NEXUS_URL=https://terminal.humanizar-dev.cloud
-curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh \
+curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh \
   | sudo NEXUS_URL="$NEXUS_URL" WORKER_NAME=<NAME> bash -s -- <API_KEY>
 ```
 
 **Plantilla para `pc-stev`** (no usa sudo; servicio systemd --user):
 ```bash
 NEXUS_URL=https://terminal.humanizar-dev.cloud
-curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh \
+curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh \
   | USER_INSTALL=1 NEXUS_URL="$NEXUS_URL" WORKER_NAME=pc-stev bash -s -- <API_KEY>
 # Y, una sola vez para que arranque sin login:
 sudo loginctl enable-linger stev
@@ -108,53 +108,53 @@ ssh vpn-principal '
 
 ### 1 — vpn-principal
 ```bash
-ssh vpn-principal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=vpn-principal bash -s -- 721c0b2b60a701a7775b6b78f73570cc492e29a602933c14e54c8907f5d6c7a1'
+ssh vpn-principal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=vpn-principal bash -s -- 721c0b2b60a701a7775b6b78f73570cc492e29a602933c14e54c8907f5d6c7a1'
 ```
 
 ### 2 — stev-server
 ```bash
-ssh stev-server 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=stev-server bash -s -- dee5c12ca38861dc1d8514728ea7ea5523e5ddb4d957de56e3d2fcbcdcfdedb3'
+ssh stev-server 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=stev-server bash -s -- dee5c12ca38861dc1d8514728ea7ea5523e5ddb4d957de56e3d2fcbcdcfdedb3'
 ```
 
 ### 3 — humanizar1
 ```bash
-ssh humanizar1 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar1 bash -s -- 1cf1eed7b60976f1a496d745cc36215afbb504b52dc38ce403a8b99ae0d2d374'
+ssh humanizar1 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar1 bash -s -- 1cf1eed7b60976f1a496d745cc36215afbb504b52dc38ce403a8b99ae0d2d374'
 ```
 
 ### 4 — humanizar2
 ```bash
-ssh humanizar2 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar2 bash -s -- 226d017a01be7d8d43d05e3999e88b06359634fa831dc64731aa7cfd43182d29'
+ssh humanizar2 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar2 bash -s -- 226d017a01be7d8d43d05e3999e88b06359634fa831dc64731aa7cfd43182d29'
 ```
 
 ### 5 — servidor-i3
 ```bash
-ssh servidor-i3 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=servidor-i3 bash -s -- 539723634f82826533fb4acd1fa3b7511ec730e21f0be1012b73acdc07c66d7d'
+ssh servidor-i3 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=servidor-i3 bash -s -- 539723634f82826533fb4acd1fa3b7511ec730e21f0be1012b73acdc07c66d7d'
 ```
 
 ### 6 — nass-stev
 ```bash
-ssh nass-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=nass-stev bash -s -- 4cab9ab30746a3fcfbf41c15811f0dd8cf6ad8f72b9d8a5de72368ec7f535817'
+ssh nass-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=nass-stev bash -s -- 4cab9ab30746a3fcfbf41c15811f0dd8cf6ad8f72b9d8a5de72368ec7f535817'
 ```
 
 ### 7 — pc-stev (USER_INSTALL=1, sin sudo)
 ```bash
-ssh pc-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | USER_INSTALL=1 NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=pc-stev bash -s -- 523edea5378e21b1fe2195fb9b09261d18bf264aa0c6815192752f8c71e019e0'
+ssh pc-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | USER_INSTALL=1 NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=pc-stev bash -s -- 523edea5378e21b1fe2195fb9b09261d18bf264aa0c6815192752f8c71e019e0'
 ssh pc-stev 'sudo loginctl enable-linger stev'   # solo una vez
 ```
 
 ### 8 — ws-humanizar
 ```bash
-ssh ws-humanizar 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-humanizar bash -s -- 656a171234643f488503175937295aff7a3f4dade2f3085b0109f1c63dca94d8'
+ssh ws-humanizar 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-humanizar bash -s -- 656a171234643f488503175937295aff7a3f4dade2f3085b0109f1c63dca94d8'
 ```
 
 ### 9 — ws-personal
 ```bash
-ssh ws-personal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-personal bash -s -- 745ec8f1fefb943dd049223f8a52ffedafc797b5786c0c812fe82506b3338b0a'
+ssh ws-personal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-personal bash -s -- 745ec8f1fefb943dd049223f8a52ffedafc797b5786c0c812fe82506b3338b0a'
 ```
 
 ### 10 — ws-indotel
 ```bash
-ssh ws-indotel 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-indotel bash -s -- f478ec9df6cfc70c76d421d534e98767a13ec4e1b8bcbda991c7f02c25b5cbac'
+ssh ws-indotel 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-indotel bash -s -- f478ec9df6cfc70c76d421d534e98767a13ec4e1b8bcbda991c7f02c25b5cbac'
 ```
 
 ---
