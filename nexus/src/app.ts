@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs, { existsSync } from 'fs';
+import { spawn } from 'child_process';
 import authRoutes from './routes/auth.routes';
 import workerRoutes from './routes/worker.routes';
 import paymentRoutes from './routes/payment.routes';
@@ -45,185 +46,73 @@ app.post('/api/admin/upgrade-plan', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-const downloadRoots = [
-  path.resolve(process.cwd(), 'dist/packages'),
-  path.resolve(process.cwd(), '../dist/packages'),
-  '/usr/share/ultimate-terminal/downloads'
-];
-
 const installScriptPaths = [
   path.join(__dirname, 'scripts/install-worker.sh'),
   path.resolve(process.cwd(), 'nexus/src/scripts/install-worker.sh'),
   path.resolve(process.cwd(), 'src/scripts/install-worker.sh')
 ];
 
-const defaultNexusUrl = process.env.NEXUS_PUBLIC_URL || process.env.NEXUS_URL || 'http://localhost:3002';
+const workerSourceRoots = [
+  path.resolve(process.cwd(), 'worker'),
+  path.resolve(process.cwd(), '../worker'),
+  path.resolve(__dirname, '../../worker')
+];
 
-const INSTALL_SCRIPT_FALLBACK = `#!/bin/bash
-set -e
+const downloadRoots = [
+  path.resolve(process.cwd(), 'dist/packages'),
+  path.resolve(process.cwd(), '../dist/packages'),
+  '/usr/share/ultimate-terminal/downloads'
+];
 
-NEXUS_URL=\"\${NEXUS_URL:-${defaultNexusUrl}}\"
-API_KEY=\"\${1}\"
-
-if [ -z \"\${API_KEY}\" ]; then
-  echo \"Uso: curl -fsSL \$NEXUS_URL/install.sh | bash -s -- <API_KEY>\"
-  exit 1
-fi
-
-SUDO=\"\"
-if [ \"\$(id -u)\" -ne 0 ]; then
-  if command -v sudo >/dev/null 2>&1; then
-    SUDO=\"sudo\"
-  else
-    echo \"Error: se requiere sudo para instalar paquetes.\"
-    exit 1
-  fi
-fi
-
-OS_ID=\"unknown\"
-VERSION_ID=\"unknown\"
-if [ -f /etc/os-release ]; then
-  . /etc/os-release
-  OS_ID=\"\${ID:-unknown}\"
-  VERSION_ID=\"\${VERSION_ID:-unknown}\"
-fi
-ARCH_RAW=\"\$(uname -m || echo unknown)\"
-
-echo \"Instalando/Actualizando Ultimate Terminal Worker...\"
-echo \"Sistema detectado: \${OS_ID} \${VERSION_ID} (\${ARCH_RAW})\"
-
-install_deb() {
-  apt_fix() {
-    echo \"Resolviendo dependencias...\"
-    if \${SUDO} apt-get update -y && \${SUDO} apt-get install -f -y; then
-      return 0
-    fi
-
-    echo \"Reintentando con IPv4 + mirror alterno...\"
-    APT_OPTS=\"-o Acquire::Retries=3 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=20\"
-    if [ -f /etc/apt/sources.list ]; then
-      if echo \"\${OS_ID}\" | grep -Eq \"^(ubuntu|linuxmint|pop|kali)$\"; then
-        \${SUDO} sed -i \
-          -e \"s|http://security.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g\" \
-          -e \"s|https://security.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g\" \
-          /etc/apt/sources.list || true
-      fi
-    fi
-    \${SUDO} apt-get \${APT_OPTS} update -y || true
-    \${SUDO} apt-get \${APT_OPTS} install -f -y
-  }
-
-  local tmp_deb
-  tmp_deb=\"\$(mktemp /tmp/worker.XXXXXX.deb)\"
-  echo \"Descargando worker .deb...\"
-  curl -fL \"\${NEXUS_URL}/api/downloads/latest/worker-linux.deb?os=\${OS_ID}&version=\${VERSION_ID}&arch=\${ARCH_RAW}\" -o \"\${tmp_deb}\"
-  echo \"Instalando...\"
-  \${SUDO} dpkg -i \"\${tmp_deb}\" || apt_fix
-  rm -f \"\${tmp_deb}\" || true
-}
-
-install_rpm() {
-  local tmp_rpm
-  tmp_rpm=\"\$(mktemp /tmp/worker.XXXXXX.rpm)\"
-  echo \"Descargando worker .rpm...\"
-  curl -fL \"\${NEXUS_URL}/api/downloads/latest/worker-linux.rpm?os=\${OS_ID}&version=\${VERSION_ID}&arch=\${ARCH_RAW}\" -o \"\${tmp_rpm}\"
-  echo \"Instalando...\"
-  \${SUDO} rpm -Uvh \"\${tmp_rpm}\" || \${SUDO} rpm -Uvh --oldpackage --replacepkgs \"\${tmp_rpm}\"
-  rm -f \"\${tmp_rpm}\" || true
-}
-
-case \"\${OS_ID}\" in
-  ubuntu|debian|linuxmint|pop|kali)
-    install_deb
-    ;;
-  fedora|rhel|centos|rocky|alma)
-    install_rpm
-    ;;
-  arch|manjaro|endeavouros)
-    echo \"Arch Linux detectado.\"
-    echo \"No hay paquete oficial disponible. Usa el binario manual o compila desde fuente.\"
-    exit 1
-    ;;
-  *)
-    if [ -f /etc/debian_version ]; then
-      install_deb
-    elif [ -f /etc/redhat-release ] || [ -f /etc/centos-release ] || [ -f /etc/fedora-release ]; then
-      install_rpm
-    else
-      echo \"Distribucion no soportada automaticamente. Usa el binario o paquete manualmente.\"
-      exit 1
-    fi
-    ;;
-esac
-
-CONFIG_FILE=\"/etc/ultimate-terminal/worker.env\"
-\${SUDO} mkdir -p /etc/ultimate-terminal
-if grep -q \"NEXUS_URL=\" \"\${CONFIG_FILE}\" 2>/dev/null; then
-  \${SUDO} sed -i \"s|^NEXUS_URL=.*|NEXUS_URL=\${NEXUS_URL}|\" \"\${CONFIG_FILE}\"
-else
-  echo \"NEXUS_URL=\${NEXUS_URL}\" | \${SUDO} tee -a \"\${CONFIG_FILE}\" >/dev/null
-fi
-if grep -q \"API_KEY=\" \"\${CONFIG_FILE}\" 2>/dev/null; then
-  \${SUDO} sed -i \"s|^API_KEY=.*|API_KEY=\${API_KEY}|\" \"\${CONFIG_FILE}\"
-else
-  echo \"API_KEY=\${API_KEY}\" | \${SUDO} tee -a \"\${CONFIG_FILE}\" >/dev/null
-fi
-
-if [ -n \"\${WORKER_NAME:-}\" ]; then
-  if grep -q \"WORKER_NAME=\" \"\${CONFIG_FILE}\" 2>/dev/null; then
-    \${SUDO} sed -i \"s|^WORKER_NAME=.*|WORKER_NAME=\${WORKER_NAME}|\" \"\${CONFIG_FILE}\"
-  else
-    echo \"WORKER_NAME=\${WORKER_NAME}\" | \${SUDO} tee -a \"\${CONFIG_FILE}\" >/dev/null
-  fi
-fi
-
-if [ -x /usr/bin/ultimate-terminal-worker ]; then
-  if command -v timeout >/dev/null 2>&1; then
-    rc=0
-    timeout 2 /usr/bin/ultimate-terminal-worker --help >/dev/null 2>&1 || rc=$?
-    if [ \"\$rc\" -eq 124 ]; then
-      rc=0
-    fi
-  else
-    rc=0
-    /usr/bin/ultimate-terminal-worker --help >/dev/null 2>&1 || rc=$?
-  fi
-  if [ \"\$rc\" -ne 0 ]; then
-    echo \"ERROR: El binario no ejecuta correctamente (posible incompatibilidad GLIBC).\"
-    echo \"Recomendado: compilar el worker en Ubuntu 20.04 con Node 18 y reempaquetar.\"
-    exit 1
-  fi
-fi
-
-if command -v systemctl >/dev/null 2>&1 && [ \"\$(ps -p 1 -o comm=)\" = \"systemd\" ]; then
-  echo \"Reiniciando servicio...\"
-  \${SUDO} systemctl restart ultimate-terminal-worker || true
-  echo \"Listo: worker configurado.\"
-else
-  echo \"systemd no detectado. Inicia el worker manualmente:\"
-  echo \"  NEXUS_URL=\${NEXUS_URL} API_KEY=\${API_KEY} /usr/bin/ultimate-terminal-worker\"
-fi
-`;
-
-app.get('/install.sh', (req, res) => {
-  const filePath = installScriptPaths.find(p => existsSync(p));
-  if (filePath) {
-    res.type('text/x-shellscript').send(fs.readFileSync(filePath, 'utf-8'));
+app.get('/install.sh', (_req, res) => {
+  const filePath = installScriptPaths.find((p) => existsSync(p));
+  if (!filePath) {
+    res.status(500).type('text/plain').send('install-worker.sh no encontrado en el servidor');
     return;
   }
-  res.type('text/x-shellscript').send(INSTALL_SCRIPT_FALLBACK);
+  res.type('text/x-shellscript').send(fs.readFileSync(filePath, 'utf-8'));
 });
 
+// Tarball con el código fuente del worker para que el instalador pueda compilar
+// localmente sin depender de GitHub.
+app.get('/api/downloads/source', (_req, res) => {
+  const workerDir = workerSourceRoots.find((p) => existsSync(p));
+  if (!workerDir) {
+    res.status(404).type('text/plain').send('Worker source not found on server');
+    return;
+  }
+  const parent = path.dirname(workerDir);
+  const base = path.basename(workerDir);
+  res.type('application/gzip');
+  res.setHeader('Content-Disposition', 'attachment; filename="worker-source.tar.gz"');
+  const tar = spawn('tar', [
+    '--exclude=node_modules',
+    '--exclude=dist',
+    '--exclude=*.log',
+    '--exclude=worker-dist.*',
+    '-czf', '-', '-C', parent, base
+  ]);
+  tar.stdout.pipe(res);
+  tar.stderr.on('data', (chunk) => console.error('[source.tar.gz]', chunk.toString()));
+  tar.on('error', (err) => {
+    console.error('[source.tar.gz] spawn error', err);
+    if (!res.headersSent) res.status(500).end();
+  });
+});
+
+// Compatibilidad: si existen paquetes pre-compilados, se siguen sirviendo.
+// Si no existen, devolvemos un mensaje claro recomendando el instalador
+// universal (source build), en lugar del 404 confuso original.
 app.get('/api/downloads/latest/worker-linux.:ext', (req, res) => {
   const { ext } = req.params;
-  const os = typeof req.query.os === 'string' ? req.query.os : '';
-  const version = typeof req.query.version === 'string' ? req.query.version : '';
-  const arch = typeof req.query.arch === 'string' ? req.query.arch : '';
   const allowed = ext === 'deb' || ext === 'rpm';
   if (!allowed) {
     res.status(400).send('Formato no soportado. Usa .deb o .rpm');
     return;
   }
+  const os = typeof req.query.os === 'string' ? req.query.os : '';
+  const version = typeof req.query.version === 'string' ? req.query.version : '';
+  const arch = typeof req.query.arch === 'string' ? req.query.arch : '';
 
   const normalizeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
   const osKey = normalizeToken(os);
@@ -233,8 +122,7 @@ app.get('/api/downloads/latest/worker-linux.:ext', (req, res) => {
 
   const candidates = downloadRoots.flatMap((root) => {
     if (!existsSync(root)) return [];
-    const entries = fs.readdirSync(root);
-    return entries
+    return fs.readdirSync(root)
       .filter((name) => (
         (name.startsWith('ultimate-terminal-worker') || name.startsWith('worker-linux')) &&
         name.endsWith(`.${ext}`)
@@ -255,14 +143,19 @@ app.get('/api/downloads/latest/worker-linux.:ext', (req, res) => {
       }));
   });
 
-  const file = candidates
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.name.length - a.name.length;
-    })[0];
+  const file = candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.name.length - a.name.length;
+  })[0];
 
   if (!file) {
-    res.status(404).send('Paquete de worker no encontrado en el servidor.');
+    res.status(410)
+      .type('text/plain')
+      .send(
+        'No hay paquetes prebuilt .deb/.rpm en este Nexus.\n' +
+        'Usa el instalador universal (source build):\n' +
+        `  curl -fsSL "${process.env.NEXUS_PUBLIC_URL || process.env.NEXUS_URL || ''}/install.sh" | sudo NEXUS_URL="${process.env.NEXUS_PUBLIC_URL || process.env.NEXUS_URL || ''}" WORKER_NAME=<nombre> bash -s -- <API_KEY>\n`
+      );
     return;
   }
 

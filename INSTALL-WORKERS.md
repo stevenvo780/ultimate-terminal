@@ -68,93 +68,45 @@ Para cada uno de los 10 servidores, conéctate por SSH y ejecuta la instalación
 | 9 | ws-personal | ws-personal | operador | VM en pc-stev | |
 | 10 | ws-indotel | ws-indotel | operador | VM en pc-stev | |
 
-### Procedimiento por servidor
+### Procedimiento por servidor (one-liner)
 
-En cada servidor, ejecuta con sudo:
+El nexus expone `/install.sh`, que hace todo el trabajo: instala Node.js + build deps,
+descarga la fuente del worker (preferentemente desde el propio nexus en
+`/api/downloads/source`, o como fallback `git clone` desde GitHub), compila con `tsc`,
+copia a `/opt/ultimate-terminal-worker`, escribe `/etc/ultimate-terminal/worker.env`
+y registra el servicio systemd.
 
 ```bash
-#!/bin/bash
-set -euo pipefail
-
 NEXUS_URL="https://terminal.humanizar-dev.cloud"
-WORKER_TOKEN="<REEMPLAZA_CON_EL_ID_DE_LA_FASE_1>"
-WORKER_NAME="<REEMPLAZA_CON_EL_NOMBRE>"
+WORKER_TOKEN="<UUID_DEL_WORKER>"
+WORKER_NAME="<NOMBRE_DEL_HOST>"
 
-echo "=== Instalando TermiCoop worker: $WORKER_NAME ==="
-
-# 1. Requisitos
-if ! command -v node &>/dev/null; then
-  echo "Instalando Node.js..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y nodejs
-fi
-sudo apt-get install -y build-essential python3 make gcc
-
-# 2. Clonar y compilar worker
-cd /tmp
-rm -rf TermiCoop-worker-install
-git clone --depth 1 https://github.com/stevenvo780/TermiCoop.git TermiCoop-worker-install
-cd TermiCoop-worker-install/worker
-npm install
-npx tsc
-
-# 3. Instalar binarios
-sudo mkdir -p /opt/ultimate-terminal-worker
-sudo cp -r dist node_modules package.json /opt/ultimate-terminal-worker/
-
-# 4. Configurar
-sudo mkdir -p /etc/ultimate-terminal
-sudo tee /etc/ultimate-terminal/worker.env > /dev/null << EOF
-NEXUS_URL=$NEXUS_URL
-WORKER_TOKEN=$WORKER_TOKEN
-WORKER_NAME=$WORKER_NAME
-WORKER_HEARTBEAT_MS=5000
-AUTO_RESTART_SHELL=true
-EOF
-sudo chmod 600 /etc/ultimate-terminal/worker.env
-
-# 5. Servicio systemd
-sudo tee /etc/systemd/system/ultimate-terminal-worker.service > /dev/null << 'SVCEOF'
-[Unit]
-Description=TermiCoop Worker
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/ultimate-terminal/worker.env
-ExecStart=/usr/bin/node /opt/ultimate-terminal-worker/dist/index.js
-WorkingDirectory=/opt/ultimate-terminal-worker
-Restart=always
-RestartSec=5
-User=root
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-
-# 6. Arrancar
-sudo systemctl daemon-reload
-sudo systemctl enable --now ultimate-terminal-worker
-
-# 7. Verificar
-sleep 3
-sudo systemctl status ultimate-terminal-worker --no-pager -l
-echo "=== Worker $WORKER_NAME instalado ==="
-
-# 8. Limpiar
-rm -rf /tmp/TermiCoop-worker-install
+curl -fsSL "$NEXUS_URL/install.sh" \
+  | sudo NEXUS_URL="$NEXUS_URL" WORKER_NAME="$WORKER_NAME" bash -s -- "$WORKER_TOKEN"
 ```
 
-### ⚡ Comando rápido por servidor (copiar, pegar y ajustar)
+Funciona en Ubuntu/Debian/Mint/Pop/Kali, Fedora/RHEL/CentOS/Rocky/Alma y Arch/Manjaro.
+Ya **no** depende de paquetes `.deb`/`.rpm` pre-compilados (esos requerían Docker y se
+rompían por GLIBC). Siempre compila desde source con Node.js — funciona en cualquier
+distro reciente.
+
+### Ejecución por SSH
 
 ```bash
-# vpn-principal (WORKER_TOKEN del paso 1)
-ssh vpn-principal 'NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_TOKEN=<ID> WORKER_NAME=vpn-principal sudo -E bash -c "$(curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh)"'
+ssh vpn-principal "curl -fsSL https://terminal.humanizar-dev.cloud/install.sh \
+  | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=vpn-principal \
+        bash -s -- <WORKER_TOKEN>"
 ```
 
-Si el instalador universal no existe o falla, usa el script manual de arriba.
+### Variables opcionales
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `NEXUS_URL` | `http://localhost:3002` | URL pública del nexus |
+| `WORKER_NAME` | `$(hostname)` | Nombre visible en la plataforma |
+| `NODE_MAJOR` | `22` | Versión mayor de Node a instalar si falta |
+| `TERMICOOP_REPO_URL` | `https://github.com/stevenvo780/TermiCoop.git` | Fallback si el nexus no sirve la fuente |
+| `TERMICOOP_REPO_REF` | `main` | Branch / tag a clonar |
 
 ---
 
