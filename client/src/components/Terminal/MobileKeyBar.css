@@ -21,6 +21,10 @@
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
     /* Safe area for notched phones */
     padding-bottom: max(6px, env(safe-area-inset-bottom));
+    /* Smoothly follow the on-screen keyboard (bottom is updated via JS
+       using window.visualViewport so the bar stays above the keyboard). */
+    transition: bottom 120ms ease-out;
+    will-change: bottom;
   }
 
   .keybar-row {

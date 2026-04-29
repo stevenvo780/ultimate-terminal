@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import './MobileKeyBar.css';
 
 interface MobileKeyBarProps {
@@ -60,6 +60,40 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
   const [activeModifiers, setActiveModifiers] = useState<Set<Modifier>>(new Set());
   const [showCtrlPanel, setShowCtrlPanel] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep the bar above the on-screen keyboard by tracking visualViewport.
+  // position: fixed is anchored to the layout viewport, so we offset `bottom`
+  // by the difference between layout and visual viewports.
+  useEffect(() => {
+    if (!visible) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const el = barRef.current;
+      if (!el) return;
+      const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      el.style.bottom = `${offset}px`;
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(update);
+    };
+
+    update();
+    vv.addEventListener('resize', schedule);
+    vv.addEventListener('scroll', schedule);
+    return () => {
+      vv.removeEventListener('resize', schedule);
+      vv.removeEventListener('scroll', schedule);
+      if (frame) cancelAnimationFrame(frame);
+      const el = barRef.current;
+      if (el) el.style.bottom = '';
+    };
+  }, [visible]);
 
   const handleModifier = useCallback((mod: Modifier) => {
     setActiveModifiers((prev) => {
@@ -132,7 +166,7 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
   if (!visible) return null;
 
   return (
-    <div className="mobile-keybar">
+    <div className="mobile-keybar" ref={barRef}>
       {showCtrlPanel && (
         <div className="keybar-ctrl-panel">
           <span className="ctrl-panel-label">Ctrl +</span>
