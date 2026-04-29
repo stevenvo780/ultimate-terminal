@@ -1,7 +1,7 @@
 # Prompt — Instalación de Workers TermiCoop (para IA con acceso SSH)
 
 > Pásale **todo este archivo** como input a la IA que tiene acceso SSH a los 10 hosts.
-> Última actualización: 2026-04-29 — instalador source-based, ya probado en `main` (commit `2f392e2`).
+> Última actualización: 2026-04-29 — instalador dual-path (.deb preferido, source fallback), commit `07d891e` en `main`.
 
 ---
 
@@ -9,13 +9,43 @@
 
 Instalar / reinstalar el worker `ultimate-terminal-worker` en 10 hosts, conectándolos al hub central que ya está en producción (`https://terminal.humanizar-dev.cloud`). El frontend ya está desplegado en Vercel (`https://terminal.humanizar.cloud`). Tu trabajo es **solo los workers**.
 
-**Importante:** los `.deb` / `.rpm` pre-compilados **no están disponibles** y nunca lo estuvieron de forma estable (requerían Docker + GLIBC matchings). El instalador correcto **descarga el código fuente y compila con Node.js + tsc en cada host** — eso es lo que el script hace por ti. No intentes bajar `.deb` manualmente: fallará con 404 / GLIBC mismatch.
+**Cómo funciona el instalador (dual-path):**
+
+1. **Path binario (preferido)** — intenta bajar el `.deb` desde la última GitHub Release pública (`https://github.com/stevenvo780/TermiCoop/releases/latest/download/ultimate-terminal-worker_<version>_<distro-version>_amd64_x86_64.deb`). Si la distro encaja con uno de los .deb publicados (Ubuntu 20.04 / 22.04 / 24.04, Debian 11/12/13, Kali, Mint, Pop), `dpkg -i` y listo.
+2. **Smoke test** del binario `/usr/bin/ultimate-terminal-worker --help`. Si pasa → service ya está registrado por el .deb, solo se escribe `/etc/ultimate-terminal/worker.env` y se arranca.
+3. **Fallback automático a source build** si:
+   - No existe Release todavía (404 → ver "Pre-requisito" abajo);
+   - GLIBC no coincide (smoke test falla);
+   - Distro no soportada por los .deb (Fedora/RHEL/Arch); aquí salta directo a source.
+   - Source build hace: `git clone` (o tar.gz desde `/api/downloads/source` del nexus si está disponible), `npm install` (manejando workspaces de monorepo), `npx tsc`, `npm rebuild node-pty`, copia a `/opt/ultimate-terminal-worker`, escribe `worker.env`, registra service.
+
+Todo eso es **automático**: el delegate AI solo ejecuta el one-liner.
 
 El instalador es:
 ```
 https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh
 ```
-Funciona sin más en Ubuntu, Debian, Mint, Pop!_OS, Kali, Fedora, RHEL, CentOS, Rocky, Alma, Arch y Manjaro. Detecta la distro, instala Node 22 si falta, clona la fuente, hace `tsc + npm rebuild node-pty`, copia a `/opt/ultimate-terminal-worker`, escribe `/etc/ultimate-terminal/worker.env` y registra `ultimate-terminal-worker.service` en systemd. Para `pc-stev` usa modo `USER_INSTALL=1` (servicio de usuario, sin sudo).
+Funciona sin más en Ubuntu, Debian, Mint, Pop!_OS, Kali, Fedora, RHEL, CentOS, Rocky, Alma, Arch y Manjaro. Para `pc-stev` usa modo `USER_INSTALL=1` (servicio de usuario, sin sudo) — en ese modo siempre va por source build (los .deb instalan a `/usr/bin`, que requiere root).
+
+---
+
+## Pre-requisito: publicar la primera Release de .deb (el dueño del repo, una vez)
+
+Mientras no exista la Release, **el instalador igual funciona** (cae a source build). Si quieres habilitar el path rápido `.deb`:
+
+```bash
+# Desde el repo, en main:
+git tag worker-v1.0.0
+git push origin worker-v1.0.0
+```
+
+Eso dispara `.github/workflows/release-worker.yml`, que en ~10 min publica:
+- `ultimate-terminal-worker_1.0.0_ubuntu20.04_amd64_x86_64.deb`
+- `ultimate-terminal-worker_1.0.0_ubuntu22.04_amd64_x86_64.deb`
+- `ultimate-terminal-worker_1.0.0_ubuntu24.04_amd64_x86_64.deb`
+- `worker-source-prebuilt.tar.gz`
+
+A partir de ahí los hosts derivados de Debian/Ubuntu (8 de 10) usan el path binario; `nass-stev` (depende de la distro real) y `pc-stev` (USER_INSTALL) usan source.
 
 ---
 
@@ -166,7 +196,10 @@ Login en `https://terminal.humanizar.cloud` con usuario `stev` (o admin fallback
 | `node-pty` no compila | Faltan headers/python3 | El script instala `build-essential python3 make gcc g++`; en distros raras instálalos a mano |
 | Worker arranca pero `websocket error` | El token no es la `api_key` (hex 64), pusiste el UUID | Reemplaza por la `api_key` de la tabla y `restart` |
 | 404 en `https://terminal.humanizar-dev.cloud/api/downloads/source` | El nexus en vpn-principal aún no se actualizó | El instalador cae a `git clone` automáticamente — funciona igual. Para arreglar el nexus, sigue el paso "Bonus" arriba |
-| 410 / "No hay paquetes prebuilt .deb" | Estás llamando al endpoint viejo | Eso es esperado y correcto: usa `/install.sh` o el script de raw GitHub |
+| 410 / "No hay paquetes prebuilt .deb" | Estás llamando al endpoint viejo del nexus | Eso es esperado y correcto: usa `/install.sh` o el script de raw GitHub |
+| 404 al bajar el `.deb` desde GitHub Releases | Aún no se ha publicado la Release | El script cae a source build automáticamente. Para habilitar el path rápido, ver "Pre-requisito" arriba |
+| `dpkg: dependency problems` | El .deb publicado tiene una versión de Node embebida que no encaja | Ejecuta de nuevo con `PREFER_BINARY=0 …` para forzar source: `… \| sudo PREFER_BINARY=0 NEXUS_URL=… bash -s -- <token>` |
+| Worker arrancó pero el binario `/usr/bin/ultimate-terminal-worker` da `error while loading shared libraries` | GLIBC del .deb no encaja con el host | El script ya hace `dpkg -r` y reintenta con source automáticamente; si quedó a medias: `sudo apt remove -y ultimate-terminal-worker && reejecuta con PREFER_BINARY=0` |
 | `Empty reply from server` al usar curl al nexus | Nginx anti-scan rechaza User-Agent vacío | Usa `curl -A "..."`; los instaladores ya envían UA por defecto |
 | Worker `last_seen` antiguo en DB | Worker caído / red caída | `systemctl status` y `journalctl -n 50` en ese host |
 
@@ -188,7 +221,14 @@ DELETE FROM workers WHERE id IN ('<uuid_offline_1>', '<uuid_offline_2>');
 
 ## Anatomía de un worker instalado (referencia)
 
-**Modo system (default):**
+**Modo binario (default cuando hay Release y la distro encaja):**
+```
+/usr/bin/ultimate-terminal-worker          # binario empaquetado con pkg
+/usr/lib/systemd/system/ultimate-terminal-worker.service
+/etc/ultimate-terminal/worker.env          (chmod 600, lo escribe el script)
+```
+
+**Modo system source (fallback automático):**
 ```
 /opt/ultimate-terminal-worker/
 ├── dist/index.js        # entrypoint compilado
@@ -225,6 +265,7 @@ AUTO_RESTART_SHELL=true
 1. **Procesa los hosts en serie**, no en paralelo: si una distro requiere instalar Node, evita pelearte con apt locks concurrentes.
 2. **Tras cada host**, verifica `systemctl status` y un par de líneas de `journalctl` antes de pasar al siguiente.
 3. **Si un host falla**, NO intentes "arreglar" cambiando el script; reporta el error textual de logs y sigue con los demás.
-4. **Nunca uses los endpoints `/api/downloads/latest/worker-linux.deb` o `.rpm`** — devuelven 410. El flujo correcto es source build (lo que hace el script).
-5. **`pc-stev` es la única excepción** del patrón: USER_INSTALL=1, sin sudo, y `loginctl enable-linger` la primera vez.
-6. **Reporte final**: pega el output del SQL de verificación (10 filas, status online).
+4. **Si un host falla específicamente con error de .deb / GLIBC**, reintenta con `PREFER_BINARY=0` para forzar source build en ese host.
+5. **Nunca uses los endpoints `/api/downloads/latest/worker-linux.deb` o `.rpm` del nexus** — devuelven 410. El instalador correcto baja el .deb desde GitHub Releases o compila source.
+6. **`pc-stev` es la única excepción** del patrón: USER_INSTALL=1, sin sudo, y `loginctl enable-linger` la primera vez.
+7. **Reporte final**: pega el output del SQL de verificación (10 filas, status online), e indica para cada host si fue *binario* o *source* (mira el `journalctl` la primera línea del worker, o `which ultimate-terminal-worker`).
