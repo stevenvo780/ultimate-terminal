@@ -1,0 +1,230 @@
+# Prompt — Instalación de Workers TermiCoop (para IA con acceso SSH)
+
+> Pásale **todo este archivo** como input a la IA que tiene acceso SSH a los 10 hosts.
+> Última actualización: 2026-04-29 — instalador source-based, ya probado en `main` (commit `2f392e2`).
+
+---
+
+## Resumen del trabajo
+
+Instalar / reinstalar el worker `ultimate-terminal-worker` en 10 hosts, conectándolos al hub central que ya está en producción (`https://terminal.humanizar-dev.cloud`). El frontend ya está desplegado en Vercel (`https://terminal.humanizar.cloud`). Tu trabajo es **solo los workers**.
+
+**Importante:** los `.deb` / `.rpm` pre-compilados **no están disponibles** y nunca lo estuvieron de forma estable (requerían Docker + GLIBC matchings). El instalador correcto **descarga el código fuente y compila con Node.js + tsc en cada host** — eso es lo que el script hace por ti. No intentes bajar `.deb` manualmente: fallará con 404 / GLIBC mismatch.
+
+El instalador es:
+```
+https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh
+```
+Funciona sin más en Ubuntu, Debian, Mint, Pop!_OS, Kali, Fedora, RHEL, CentOS, Rocky, Alma, Arch y Manjaro. Detecta la distro, instala Node 22 si falta, clona la fuente, hace `tsc + npm rebuild node-pty`, copia a `/opt/ultimate-terminal-worker`, escribe `/etc/ultimate-terminal/worker.env` y registra `ultimate-terminal-worker.service` en systemd. Para `pc-stev` usa modo `USER_INSTALL=1` (servicio de usuario, sin sudo).
+
+---
+
+## One-liner por host
+
+**Plantilla genérica** (root/sudo, todos los hosts excepto `pc-stev`):
+```bash
+NEXUS_URL=https://terminal.humanizar-dev.cloud
+curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh \
+  | sudo NEXUS_URL="$NEXUS_URL" WORKER_NAME=<NAME> bash -s -- <API_KEY>
+```
+
+**Plantilla para `pc-stev`** (no usa sudo; servicio systemd --user):
+```bash
+NEXUS_URL=https://terminal.humanizar-dev.cloud
+curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh \
+  | USER_INSTALL=1 NEXUS_URL="$NEXUS_URL" WORKER_NAME=pc-stev bash -s -- <API_KEY>
+# Y, una sola vez para que arranque sin login:
+sudo loginctl enable-linger stev
+```
+
+> El `<API_KEY>` (también llamado `WORKER_TOKEN`) es la columna `api_key` de la tabla `workers` en Postgres — **64 caracteres hex**, NO el UUID del worker.
+
+---
+
+## Inventario de hosts (10) con tokens
+
+| # | Worker | Acceso SSH | Tipo install | API_KEY (token) |
+|---|--------|------------|--------------|-----------------|
+| 1 | `vpn-principal` | `humanizar@148.230.88.162 -p 49222` | sudo | `721c0b2b60a701a7775b6b78f73570cc492e29a602933c14e54c8907f5d6c7a1` |
+| 2 | `stev-server` | `stev@100.98.8.227` | sudo | `dee5c12ca38861dc1d8514728ea7ea5523e5ddb4d957de56e3d2fcbcdcfdedb3` |
+| 3 | `humanizar1` | `humanizar1` (ProxyJump vía `servidor-i3`) | sudo | `1cf1eed7b60976f1a496d745cc36215afbb504b52dc38ce403a8b99ae0d2d374` |
+| 4 | `humanizar2` | `humanizar@100.98.5.11` | sudo | `226d017a01be7d8d43d05e3999e88b06359634fa831dc64731aa7cfd43182d29` |
+| 5 | `servidor-i3` | `humanizar@100.98.143.113` | sudo | `539723634f82826533fb4acd1fa3b7511ec730e21f0be1012b73acdc07c66d7d` |
+| 6 | `nass-stev` | `nass@100.98.67.189` | sudo | `4cab9ab30746a3fcfbf41c15811f0dd8cf6ad8f72b9d8a5de72368ec7f535817` |
+| 7 | `pc-stev` | `stev@100.98.81.177` | **USER_INSTALL=1** | `523edea5378e21b1fe2195fb9b09261d18bf264aa0c6815192752f8c71e019e0` |
+| 8 | `ws-humanizar` | `operador@10.88.88.11` (VM en pc-stev) | sudo | `656a171234643f488503175937295aff7a3f4dade2f3085b0109f1c63dca94d8` |
+| 9 | `ws-personal` | `operador@…` (VM en pc-stev) | sudo | `745ec8f1fefb943dd049223f8a52ffedafc797b5786c0c812fe82506b3338b0a` |
+| 10 | `ws-indotel` | `operador@10.88.88.12` (VM en pc-stev) | sudo | `f478ec9df6cfc70c76d421d534e98767a13ec4e1b8bcbda991c7f02c25b5cbac` |
+
+---
+
+## Comandos exactos (copy-paste)
+
+### Bonus — actualiza el nexus primero (para que los instaladores ganen el atajo `/api/downloads/source`)
+
+```bash
+ssh vpn-principal '
+  set -e
+  cd /opt/ultimate-terminal-nexus
+  sudo -u utnexus git pull
+  sudo -u utnexus npm ci
+  sudo -u utnexus npm run build
+  sudo systemctl restart ultimate-terminal-nexus
+  sudo journalctl -u ultimate-terminal-nexus -n 20 --no-pager
+'
+```
+
+> No es estrictamente necesario: si saltas este paso, el instalador igual funciona porque cae a `git clone` desde GitHub. Hacerlo solo acelera el resto y deja `/install.sh` actualizado en el nexus.
+
+### 1 — vpn-principal
+```bash
+ssh vpn-principal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=vpn-principal bash -s -- 721c0b2b60a701a7775b6b78f73570cc492e29a602933c14e54c8907f5d6c7a1'
+```
+
+### 2 — stev-server
+```bash
+ssh stev-server 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=stev-server bash -s -- dee5c12ca38861dc1d8514728ea7ea5523e5ddb4d957de56e3d2fcbcdcfdedb3'
+```
+
+### 3 — humanizar1
+```bash
+ssh humanizar1 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar1 bash -s -- 1cf1eed7b60976f1a496d745cc36215afbb504b52dc38ce403a8b99ae0d2d374'
+```
+
+### 4 — humanizar2
+```bash
+ssh humanizar2 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar2 bash -s -- 226d017a01be7d8d43d05e3999e88b06359634fa831dc64731aa7cfd43182d29'
+```
+
+### 5 — servidor-i3
+```bash
+ssh servidor-i3 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=servidor-i3 bash -s -- 539723634f82826533fb4acd1fa3b7511ec730e21f0be1012b73acdc07c66d7d'
+```
+
+### 6 — nass-stev
+```bash
+ssh nass-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=nass-stev bash -s -- 4cab9ab30746a3fcfbf41c15811f0dd8cf6ad8f72b9d8a5de72368ec7f535817'
+```
+
+### 7 — pc-stev (USER_INSTALL=1, sin sudo)
+```bash
+ssh pc-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | USER_INSTALL=1 NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=pc-stev bash -s -- 523edea5378e21b1fe2195fb9b09261d18bf264aa0c6815192752f8c71e019e0'
+ssh pc-stev 'sudo loginctl enable-linger stev'   # solo una vez
+```
+
+### 8 — ws-humanizar
+```bash
+ssh ws-humanizar 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-humanizar bash -s -- 656a171234643f488503175937295aff7a3f4dade2f3085b0109f1c63dca94d8'
+```
+
+### 9 — ws-personal
+```bash
+ssh ws-personal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-personal bash -s -- 745ec8f1fefb943dd049223f8a52ffedafc797b5786c0c812fe82506b3338b0a'
+```
+
+### 10 — ws-indotel
+```bash
+ssh ws-indotel 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/TermiCoop/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-indotel bash -s -- f478ec9df6cfc70c76d421d534e98767a13ec4e1b8bcbda991c7f02c25b5cbac'
+```
+
+---
+
+## Verificación
+
+### Por host (al terminar cada install)
+**Workers system (todos menos pc-stev):**
+```bash
+ssh <host> 'sudo systemctl status ultimate-terminal-worker --no-pager -l | head -20 && sudo journalctl -u ultimate-terminal-worker -n 15 --no-pager'
+```
+
+**pc-stev (user service):**
+```bash
+ssh pc-stev 'systemctl --user status ultimate-terminal-worker --no-pager -l | head -20 && journalctl --user -u ultimate-terminal-worker -n 15 --no-pager'
+```
+
+Debe aparecer `[Worker] Connected to Nexus.` en los logs y status `active (running)`.
+
+### Global (desde vpn-principal o cualquier host con red al pooler de Neon)
+```bash
+PGPASSWORD='npg_NEPhH1K6OzMk' psql \
+  'postgresql://neondb_owner@ep-orange-pond-ah5yjzma-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require' \
+  -c "SELECT name, status, to_timestamp(last_seen/1000) AS last_seen FROM workers ORDER BY name;"
+```
+Debe haber **10 filas** con `status = online` y `last_seen` reciente (segundos).
+
+### Web
+Login en `https://terminal.humanizar.cloud` con usuario `stev` (o admin fallback `admin` / `AdminLocal123!`) y verificar que los 10 workers aparezcan online en la UI.
+
+---
+
+## Troubleshooting (resumido)
+
+| Síntoma | Causa probable | Acción |
+|---|---|---|
+| `Error: API_KEY (worker token) requerido.` | Olvidaste el token al final del comando | Reejecuta con `bash -s -- <API_KEY>` |
+| `npx tsc` falla por TypeScript | Node muy viejo | El script instala Node 22; si ya había uno, exporta `NODE_MAJOR=22` y vuelve a correr |
+| `node-pty` no compila | Faltan headers/python3 | El script instala `build-essential python3 make gcc g++`; en distros raras instálalos a mano |
+| Worker arranca pero `websocket error` | El token no es la `api_key` (hex 64), pusiste el UUID | Reemplaza por la `api_key` de la tabla y `restart` |
+| 404 en `https://terminal.humanizar-dev.cloud/api/downloads/source` | El nexus en vpn-principal aún no se actualizó | El instalador cae a `git clone` automáticamente — funciona igual. Para arreglar el nexus, sigue el paso "Bonus" arriba |
+| 410 / "No hay paquetes prebuilt .deb" | Estás llamando al endpoint viejo | Eso es esperado y correcto: usa `/install.sh` o el script de raw GitHub |
+| `Empty reply from server` al usar curl al nexus | Nginx anti-scan rechaza User-Agent vacío | Usa `curl -A "..."`; los instaladores ya envían UA por defecto |
+| Worker `last_seen` antiguo en DB | Worker caído / red caída | `systemctl status` y `journalctl -n 50` en ese host |
+
+---
+
+## Limpieza opcional (si hay duplicados antiguos)
+
+```sql
+-- Inspecciona primero
+SELECT id, name, status, api_key FROM workers
+ WHERE name IN ('humanizar1','humanizar2')
+ ORDER BY name, status;
+
+-- Borra solo los offline viejos (cambia los UUIDs)
+DELETE FROM workers WHERE id IN ('<uuid_offline_1>', '<uuid_offline_2>');
+```
+
+---
+
+## Anatomía de un worker instalado (referencia)
+
+**Modo system (default):**
+```
+/opt/ultimate-terminal-worker/
+├── dist/index.js        # entrypoint compilado
+├── node_modules/
+└── package.json
+/etc/ultimate-terminal/worker.env   (chmod 600)
+/etc/systemd/system/ultimate-terminal-worker.service
+```
+
+**Modo user (`USER_INSTALL=1`):**
+```
+~/.local/share/ultimate-terminal-worker/
+├── dist/index.js
+├── node_modules/
+└── package.json
+~/.config/ultimate-terminal/worker.env
+~/.config/systemd/user/ultimate-terminal-worker.service
+```
+
+Contenido de `worker.env` que escribe el script:
+```env
+NEXUS_URL=https://terminal.humanizar-dev.cloud
+API_KEY=<token>
+WORKER_TOKEN=<token>     # alias por compatibilidad
+WORKER_NAME=<nombre>
+WORKER_HEARTBEAT_MS=5000
+AUTO_RESTART_SHELL=true
+```
+
+---
+
+## Reglas para ti, IA destinataria
+
+1. **Procesa los hosts en serie**, no en paralelo: si una distro requiere instalar Node, evita pelearte con apt locks concurrentes.
+2. **Tras cada host**, verifica `systemctl status` y un par de líneas de `journalctl` antes de pasar al siguiente.
+3. **Si un host falla**, NO intentes "arreglar" cambiando el script; reporta el error textual de logs y sigue con los demás.
+4. **Nunca uses los endpoints `/api/downloads/latest/worker-linux.deb` o `.rpm`** — devuelven 410. El flujo correcto es source build (lo que hace el script).
+5. **`pc-stev` es la única excepción** del patrón: USER_INSTALL=1, sin sudo, y `loginctl enable-linger` la primera vez.
+6. **Reporte final**: pega el output del SQL de verificación (10 filas, status online).
