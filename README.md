@@ -7,31 +7,28 @@ A distributed terminal system allowing you to control and view your devices from
 - **Worker (Agent)**: Runs on the target machine (your PC/VPS). Connects to Nexus.
 - **Client (UI)**: Web interface to view and control workers.
 
-## 📦 Generated Installers
+## 📦 Worker installation & releases
 
-| Component | Platform | Location | Description |
-|-----------|----------|----------|-------------|
-| **Worker** | Linux | `worker/bin/worker-linux` | Standalone binary. Copy to any VPS/PC and run. |
+Workers are installed on each host with a single command:
 
-### Compatibilidad GLIBC (workers)
-Si el binario falla en VPS comunes (Ubuntu 20.04/22.04, Debian), compílalo dentro de un entorno base antiguo:
 ```bash
-npm run package:worker:compat
+curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh \
+  | sudo NEXUS_URL=<your-nexus> WORKER_NAME=<host-name> bash -s -- <API_KEY>
 ```
-Esto genera `worker/bin/worker-linux` usando Ubuntu 20.04 + Node 18 para mayor compatibilidad.
 
-### Paquetes por distro / version
-`/api/downloads/latest/worker-linux.deb` y `.rpm` aceptan `?os=...&version=...&arch=...` y el servidor selecciona el paquete más compatible si hay varios en `/usr/share/ultimate-terminal/downloads`.
-Convención recomendada de nombres:
-- `ultimate-terminal-worker_1.0.0_ubuntu20.04_amd64.deb`
-- `ultimate-terminal-worker_1.0.0_debian11_amd64.deb`
-- `ultimate-terminal-worker-1.0.0-1.ubuntu20.04.x86_64.rpm`
+The installer first tries the prebuilt `.deb` from the latest GitHub Release
+(Ubuntu 20.04 / 22.04 / 24.04 + Debian/Kali/Mint/Pop derivatives) and falls
+back to compiling from source on other distros or GLIBC mismatches.
 
-Build multi-ubuntu (LTS) .deb:
+To **cut a new worker release**, push a tag matching `worker-v*`:
+
 ```bash
-npm run package:deb:ubuntu
+git tag -a worker-v1.0.1 -m "Worker v1.0.1" && git push origin worker-v1.0.1
 ```
-Genera `.deb` para Ubuntu 20.04/22.04/24.04 con `libc6` mínimo adecuado y `pty.node` compilado por versión.
+
+GitHub Actions builds the `.deb`s + tarball and publishes them.
+See **[`docs/RELEASING.md`](docs/RELEASING.md)** for the full release process,
+versioning rules, troubleshooting and how to add new target distros.
 
 ## Development Setup
 
