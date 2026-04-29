@@ -1,0 +1,82 @@
+name: Release Worker (.deb / .rpm + tarball)
+
+on:
+  push:
+    tags:
+      - 'worker-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag para la release (ej: worker-v1.0.1)'
+        required: true
+        default: 'worker-vmanual'
+
+jobs:
+  build-debs:
+    name: Build .deb (Ubuntu ${{ matrix.ubuntu }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['20.04', '22.04', '24.04']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .deb in matching Ubuntu container
+        run: bash packaging/worker/build-ubuntu-debs.sh ${{ matrix.ubuntu }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-ubuntu-${{ matrix.ubuntu }}
+          path: dist/packages/*.deb
+          if-no-files-found: error
+
+  build-tarball:
+    name: Build tarball (host build)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compile worker (tsc)
+        working-directory: worker
+        run: |
+          npm ci
+          npx tsc
+          npm rebuild node-pty --build-from-source
+      - name: Pack tarball
+        run: |
+          mkdir -p dist/packages
+          tar -czf dist/packages/worker-source-prebuilt.tar.gz \
+            -C worker dist node_modules package.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-prebuilt
+          path: dist/packages/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-debs, build-tarball]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/packages
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -lh dist/packages
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Worker ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/packages/*.deb
+            dist/packages/*.tar.gz

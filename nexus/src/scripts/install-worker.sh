@@ -18,10 +18,14 @@ set -euo pipefail
 NEXUS_URL="${NEXUS_URL:-http://localhost:3002}"
 API_KEY="${1:-${API_KEY:-${WORKER_TOKEN:-}}}"
 WORKER_NAME="${WORKER_NAME:-$(hostname)}"
-REPO_URL="${TERMICOOP_REPO_URL:-https://github.com/stevenvo780/TermiCoop.git}"
+REPO_OWNER="${TERMICOOP_REPO_OWNER:-stevenvo780}"
+REPO_NAME="${TERMICOOP_REPO_NAME:-TermiCoop}"
+REPO_URL="${TERMICOOP_REPO_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}.git}"
 REPO_REF="${TERMICOOP_REPO_REF:-main}"
+RELEASE_BASE_URL="${TERMICOOP_RELEASE_BASE_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 USER_INSTALL="${USER_INSTALL:-0}"   # 1 = instala como systemd --user (sin sudo)
+PREFER_BINARY="${PREFER_BINARY:-1}"  # 1 = intenta .deb/.rpm de GitHub Releases primero
 
 if [ "$USER_INSTALL" = "1" ]; then
   INSTALL_DIR="${HOME}/.local/share/ultimate-terminal-worker"
@@ -92,6 +96,10 @@ install_pkgs_pacman() {
   $SUDO pacman -Sy --noconfirm --needed ca-certificates curl git base-devel python
 }
 
+run_root() {
+  if [ -n "$SUDO" ]; then sudo -E "$@"; else "$@"; fi
+}
+
 install_node() {
   local current_major=""
   if command -v node >/dev/null 2>&1; then
@@ -104,11 +112,13 @@ install_node() {
   echo "Instalando Node.js ${NODE_MAJOR}..."
   case "$OS_ID" in
     ubuntu|debian|linuxmint|pop|kali)
-      curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | $SUDO -E bash -
+      curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o "$WORK_DIR/nodesource.sh"
+      run_root bash "$WORK_DIR/nodesource.sh"
       $SUDO apt-get install -y nodejs
       ;;
     fedora|rhel|centos|rocky|alma)
-      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR}.x" | $SUDO -E bash -
+      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR}.x" -o "$WORK_DIR/nodesource.sh"
+      run_root bash "$WORK_DIR/nodesource.sh"
       $SUDO dnf install -y nodejs || $SUDO yum install -y nodejs
       ;;
     arch|manjaro|endeavouros)
@@ -157,38 +167,115 @@ else
   install_node
 fi
 
-echo "==> Descargando código fuente del worker..."
-SRC_DIR="$WORK_DIR/src"
-mkdir -p "$SRC_DIR"
-if curl -fL "$NEXUS_URL/api/downloads/source" -o "$WORK_DIR/source.tar.gz" 2>/dev/null \
-   && tar -tzf "$WORK_DIR/source.tar.gz" >/dev/null 2>&1; then
-  echo "Fuente obtenida desde Nexus."
-  tar -xzf "$WORK_DIR/source.tar.gz" -C "$SRC_DIR" --strip-components=1
-else
-  echo "Fuente no disponible en Nexus, clonando $REPO_URL ..."
-  git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SRC_DIR"
+USE_BINARY=0
+BIN_DEB=""
+
+if [ "$USER_INSTALL" != "1" ] && [ "$PREFER_BINARY" = "1" ]; then
+  case "$OS_ID" in
+    ubuntu|debian|linuxmint|pop|kali)
+      release_url=""
+      case "$OS_ID-$VERSION_ID" in
+        ubuntu-20.04|debian-11) release_url="${RELEASE_BASE_URL}/ultimate-terminal-worker_1.0.0_ubuntu20.04_amd64_x86_64.deb" ;;
+        ubuntu-22.04|debian-12|kali-*|pop-22.04|linuxmint-21*) release_url="${RELEASE_BASE_URL}/ultimate-terminal-worker_1.0.0_ubuntu22.04_amd64_x86_64.deb" ;;
+        ubuntu-24.04|debian-13|pop-24.04|linuxmint-22*) release_url="${RELEASE_BASE_URL}/ultimate-terminal-worker_1.0.0_ubuntu24.04_amd64_x86_64.deb" ;;
+        *) release_url="${RELEASE_BASE_URL}/ultimate-terminal-worker_1.0.0_ubuntu22.04_amd64_x86_64.deb" ;;
+      esac
+      echo "==> Intentando .deb pre-compilado: $release_url"
+      if curl -fL --retry 3 -o "$WORK_DIR/worker.deb" "$release_url" 2>/dev/null && [ -s "$WORK_DIR/worker.deb" ]; then
+        USE_BINARY=1
+        BIN_DEB="$WORK_DIR/worker.deb"
+      else
+        echo "    .deb no disponible aún (release no creada). Cambiando a source build."
+      fi
+      ;;
+  esac
 fi
 
-if [ -d "$SRC_DIR/worker" ]; then
-  WORKER_SRC="$SRC_DIR/worker"
-elif [ -d "$SRC_DIR/src" ] && [ -f "$SRC_DIR/package.json" ]; then
-  WORKER_SRC="$SRC_DIR"
-else
-  echo "Error: no encontré el código del worker en la fuente."
-  exit 1
+if [ "$USE_BINARY" = "1" ]; then
+  echo "==> Instalando .deb pre-compilado..."
+  if ! $SUDO dpkg -i "$BIN_DEB"; then
+    echo "    dpkg falló (probable dep faltante). Intentando apt-get install -f..."
+    $SUDO apt-get update -y || true
+    $SUDO apt-get install -f -y
+    $SUDO dpkg -i "$BIN_DEB"
+  fi
+  # smoke-test del binario
+  if command -v timeout >/dev/null 2>&1; then
+    rc=0; timeout 2 /usr/bin/ultimate-terminal-worker --help >/dev/null 2>&1 || rc=$?
+    [ "$rc" = "124" ] && rc=0
+  else
+    rc=0; /usr/bin/ultimate-terminal-worker --help >/dev/null 2>&1 || rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "ERROR: el binario no ejecuta (probable GLIBC). Quitando .deb y cayendo a source build..."
+    $SUDO dpkg -r ultimate-terminal-worker || true
+    USE_BINARY=0
+  fi
 fi
 
-echo "==> Compilando worker en $WORKER_SRC..."
-pushd "$WORKER_SRC" >/dev/null
-npm install --no-audit --no-fund
-npx tsc
-npm rebuild node-pty --build-from-source >/dev/null 2>&1 || true
-popd >/dev/null
+if [ "$USE_BINARY" != "1" ]; then
+  echo "==> Descargando código fuente del worker..."
+  SRC_DIR="$WORK_DIR/src"
+  mkdir -p "$SRC_DIR"
+  if curl -fL "$NEXUS_URL/api/downloads/source" -o "$WORK_DIR/source.tar.gz" 2>/dev/null \
+     && tar -tzf "$WORK_DIR/source.tar.gz" >/dev/null 2>&1; then
+    echo "Fuente obtenida desde Nexus."
+    tar -xzf "$WORK_DIR/source.tar.gz" -C "$SRC_DIR" --strip-components=1
+  else
+    echo "Fuente no disponible en Nexus, clonando $REPO_URL ..."
+    git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SRC_DIR"
+  fi
 
-echo "==> Instalando en $INSTALL_DIR..."
-$SUDO mkdir -p "$INSTALL_DIR"
-$SUDO rm -rf "$INSTALL_DIR/dist" "$INSTALL_DIR/node_modules" "$INSTALL_DIR/package.json"
-$SUDO cp -r "$WORKER_SRC/dist" "$WORKER_SRC/node_modules" "$WORKER_SRC/package.json" "$INSTALL_DIR/"
+  # Detecta si es monorepo (raíz tiene package.json + worker/) o tarball plano
+  BUILD_ROOT=""
+  WORKER_SRC=""
+  if [ -d "$SRC_DIR/worker" ] && [ -f "$SRC_DIR/package.json" ]; then
+    # Monorepo con workspaces — npm install en raíz hoist node_modules
+    BUILD_ROOT="$SRC_DIR"
+    WORKER_SRC="$SRC_DIR/worker"
+  elif [ -d "$SRC_DIR/worker" ]; then
+    BUILD_ROOT="$SRC_DIR/worker"
+    WORKER_SRC="$SRC_DIR/worker"
+  elif [ -d "$SRC_DIR/src" ] && [ -f "$SRC_DIR/package.json" ]; then
+    BUILD_ROOT="$SRC_DIR"
+    WORKER_SRC="$SRC_DIR"
+  else
+    echo "Error: no encontré el código del worker en la fuente."
+    exit 1
+  fi
+
+  echo "==> Compilando worker (build root: $BUILD_ROOT, worker: $WORKER_SRC)..."
+  pushd "$BUILD_ROOT" >/dev/null
+  npm install --no-audit --no-fund
+  popd >/dev/null
+  pushd "$WORKER_SRC" >/dev/null
+  npx tsc
+  popd >/dev/null
+  # node-pty rebuild (best effort) — nodemodules hoisted o local
+  if [ -d "$BUILD_ROOT/node_modules/node-pty" ]; then
+    (cd "$BUILD_ROOT" && npm rebuild node-pty --build-from-source) >/dev/null 2>&1 || true
+  elif [ -d "$WORKER_SRC/node_modules/node-pty" ]; then
+    (cd "$WORKER_SRC" && npm rebuild node-pty --build-from-source) >/dev/null 2>&1 || true
+  fi
+
+  # Localiza node_modules: o en worker/ (no-monorepo) o en raíz (monorepo hoist)
+  NM_DIR=""
+  if [ -d "$WORKER_SRC/node_modules" ]; then
+    NM_DIR="$WORKER_SRC/node_modules"
+  elif [ -d "$BUILD_ROOT/node_modules" ]; then
+    NM_DIR="$BUILD_ROOT/node_modules"
+  else
+    echo "Error: npm install no creó node_modules en ningún lugar conocido."
+    exit 1
+  fi
+
+  echo "==> Instalando en $INSTALL_DIR (node_modules desde $NM_DIR)..."
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO rm -rf "$INSTALL_DIR/dist" "$INSTALL_DIR/node_modules" "$INSTALL_DIR/package.json"
+  $SUDO cp -r "$WORKER_SRC/dist" "$INSTALL_DIR/"
+  $SUDO cp -r "$NM_DIR" "$INSTALL_DIR/node_modules"
+  $SUDO cp "$WORKER_SRC/package.json" "$INSTALL_DIR/"
+fi
 
 echo "==> Escribiendo configuración en $CONFIG_FILE..."
 $SUDO mkdir -p "$CONFIG_DIR"
@@ -240,8 +327,13 @@ EOF
     echo "  $NODE_BIN $INSTALL_DIR/dist/index.js"
   fi
 else
-  echo "==> Instalando servicio systemd..."
-  $SUDO tee "$SERVICE_FILE" >/dev/null <<EOF
+  if [ "$USE_BINARY" = "1" ]; then
+    echo "==> Usando service file del .deb (/usr/lib/systemd/system/ultimate-terminal-worker.service)..."
+    # El .deb ya instaló el unit; solo refrescamos.
+    $SUDO systemctl daemon-reload
+  else
+    echo "==> Instalando servicio systemd (source build)..."
+    $SUDO tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
 Description=TermiCoop / Ultimate Terminal Worker
 Documentation=https://github.com/stevenvo780/TermiCoop
@@ -266,6 +358,7 @@ SyslogIdentifier=ut-worker
 [Install]
 WantedBy=multi-user.target
 EOF
+  fi
 
   if command -v systemctl >/dev/null 2>&1 && [ "$(ps -p 1 -o comm= 2>/dev/null)" = "systemd" ]; then
     $SUDO systemctl daemon-reload
@@ -276,6 +369,7 @@ EOF
     echo "=== Worker '$WORKER_NAME' instalado y arrancado ==="
   else
     echo "systemd no detectado. Arranca manualmente:"
-    echo "  $NODE_BIN $INSTALL_DIR/dist/index.js"
+    if [ "$USE_BINARY" = "1" ]; then echo "  /usr/bin/ultimate-terminal-worker"
+    else echo "  $NODE_BIN $INSTALL_DIR/dist/index.js"; fi
   fi
 fi
