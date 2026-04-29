@@ -39,17 +39,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Compile worker (tsc)
-        working-directory: worker
+      - name: Compile worker (tsc) in isolated copy
+        # The worker/ folder is part of an npm workspaces monorepo, so a plain
+        # `npm install` at worker/ hoists deps to the repo root. Copy it to a
+        # standalone dir and install there to get a self-contained tree.
         run: |
-          npm ci
+          set -e
+          BUILD_DIR="${RUNNER_TEMP}/worker-build"
+          mkdir -p "$BUILD_DIR"
+          cp -r worker/. "$BUILD_DIR/"
+          cd "$BUILD_DIR"
+          npm install --no-audit --no-fund
           npx tsc
           npm rebuild node-pty --build-from-source
+          echo "BUILD_DIR=$BUILD_DIR" >> "$GITHUB_ENV"
       - name: Pack tarball
         run: |
           mkdir -p dist/packages
           tar -czf dist/packages/worker-source-prebuilt.tar.gz \
-            -C worker dist node_modules package.json
+            -C "$BUILD_DIR" dist node_modules package.json
       - uses: actions/upload-artifact@v4
         with:
           name: tarball-prebuilt
