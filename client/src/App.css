@@ -1396,6 +1396,7 @@
   overflow: hidden;
   padding: 6px;
   box-sizing: border-box;
+  touch-action: none;
 }
 
 .terminal-wrapper .xterm {
