@@ -607,6 +607,33 @@
     display: none;
   }
 
+  .topbar-session-nav {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #9fb3c8;
+    border-radius: 999px;
+  }
+
+  .topbar-session-nav:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .topbar-session-nav:active:not(:disabled) {
+    background: rgba(96, 165, 250, 0.2);
+    color: #fff;
+    transform: scale(0.92);
+  }
+
+  .topbar-session-nav svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2.2;
+  }
+
   .user-menu-dropdown {
     right: -4px;
     min-width: 180px;

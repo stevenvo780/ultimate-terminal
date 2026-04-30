@@ -1,7 +1,7 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import type { DragEvent, RefObject, TouchEvent as ReactTouchEvent } from 'react';
 import ReactGridLayout, { WidthProvider, type Layout } from 'react-grid-layout/legacy';
-import { ArrowDownToLine, ChevronLeft, ChevronRight, GripHorizontal, Hexagon, Plus, X } from 'lucide-react';
+import { ArrowDownToLine, GripHorizontal, Hexagon, Plus, X } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import {
   setActiveSession,
@@ -230,8 +230,6 @@ export function TerminalGrid({ instancesRef, containerRef, instancesVersion }: T
     }
   }, [isMobile, sessions, activeSessionId, dispatch]);
 
-  const currentSessionIndex = sessions.findIndex((s) => s.id === activeSessionId);
-
   const filledGridCount = useMemo(() => gridSessionIds.filter(Boolean).length, [gridSessionIds]);
   const gridSlots = useMemo(() => gridSessionIds.map((_, index) => index), [gridSessionIds]);
   const filledGridSlots = useMemo(() => gridSlots, [gridSlots]);
@@ -397,45 +395,6 @@ export function TerminalGrid({ instancesRef, containerRef, instancesVersion }: T
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Mobile session indicator + swipe nav */}
-      {isMobile && sessions.length > 1 && (
-        <>
-          <div className="mobile-session-indicator">
-            <button
-              className="mobile-nav-btn"
-              disabled={currentSessionIndex <= 0}
-              onClick={() => currentSessionIndex > 0 && dispatch(setActiveSession(sessions[currentSessionIndex - 1].id))}
-              type="button"
-            >
-              <ChevronLeft />
-            </button>
-            <div className="mobile-session-dots">
-              {sessions.map((s, idx) => (
-                <button
-                  key={s.id}
-                  className={`session-dot ${idx === currentSessionIndex ? 'active' : ''}`}
-                  onClick={() => dispatch(setActiveSession(s.id))}
-                  title={s.displayName}
-                  type="button"
-                />
-              ))}
-            </div>
-            <span className="mobile-session-name">
-              {sessions[currentSessionIndex]?.displayName || '—'}
-            </span>
-            <button
-              className="mobile-nav-btn"
-              disabled={currentSessionIndex >= sessions.length - 1}
-              onClick={() => currentSessionIndex < sessions.length - 1 && dispatch(setActiveSession(sessions[currentSessionIndex + 1].id))}
-              type="button"
-            >
-              <ChevronRight />
-            </button>
-          </div>
-
-        </>
-      )}
-
       {renderContent()}
 
       {/* Drop overlay for single layout (desktop only) */}

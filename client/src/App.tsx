@@ -300,6 +300,50 @@ function AppContent() {
       setTimeout(() => term.focus(), 0);
     });
 
+    // Touch scroll for mobile: convert vertical drags into terminal scroll.
+    // xterm's screen captures touch events and prevents the viewport's
+    // native overflow scroll, so we translate touchmove deltas manually.
+    let touchY: number | null = null;
+    let touchAccum = 0;
+    let touchActiveTouchId: number | null = null;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) {
+        touchY = null;
+        touchActiveTouchId = null;
+        return;
+      }
+      const t = e.touches[0];
+      touchActiveTouchId = t.identifier;
+      touchY = t.clientY;
+      touchAccum = 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchY === null || touchActiveTouchId === null) return;
+      const t = Array.from(e.touches).find((x) => x.identifier === touchActiveTouchId);
+      if (!t) return;
+      const dy = touchY - t.clientY;
+      touchY = t.clientY;
+      const lineHeight = Math.max(12, Math.round((term as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } } })._core?._renderService?.dimensions?.css?.cell?.height ?? 18));
+      touchAccum += dy;
+      if (Math.abs(touchAccum) >= lineHeight) {
+        const lines = Math.trunc(touchAccum / lineHeight);
+        touchAccum -= lines * lineHeight;
+        term.scrollLines(lines);
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const stillActive = Array.from(e.touches).some((x) => x.identifier === touchActiveTouchId);
+      if (!stillActive) {
+        touchY = null;
+        touchActiveTouchId = null;
+        touchAccum = 0;
+      }
+    };
+    container.addEventListener('touchstart', onTouchStart, { passive: true });
+    container.addEventListener('touchmove', onTouchMove, { passive: true });
+    container.addEventListener('touchend', onTouchEnd, { passive: true });
+    container.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
     term.onData((data) => {
       socketRef.current?.emit('execute', { workerId: worker.id, sessionId, command: data });
     });

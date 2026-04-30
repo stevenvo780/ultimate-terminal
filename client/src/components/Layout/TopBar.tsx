@@ -16,6 +16,8 @@ import {
   setEditingWorker,
 } from '../../store';
 import {
+  ChevronLeft,
+  ChevronRight,
   Download,
   CreditCard,
   KeyRound,
@@ -241,6 +243,33 @@ export function TopBar({
     onDragEnd();
   };
 
+  const currentSessionIndex = useMemo(
+    () => sessions.findIndex((s) => s.id === activeSessionId),
+    [sessions, activeSessionId]
+  );
+
+  const goToPrevSession = useCallback(() => {
+    if (currentSessionIndex <= 0) return;
+    const target = sessions[currentSessionIndex - 1];
+    if (target) {
+      dispatch(setActiveSession(target.id));
+      sessionsStripRef.current
+        ?.querySelector(`[data-session-id="${target.id}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [currentSessionIndex, sessions, dispatch]);
+
+  const goToNextSession = useCallback(() => {
+    if (currentSessionIndex < 0 || currentSessionIndex >= sessions.length - 1) return;
+    const target = sessions[currentSessionIndex + 1];
+    if (target) {
+      dispatch(setActiveSession(target.id));
+      sessionsStripRef.current
+        ?.querySelector(`[data-session-id="${target.id}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [currentSessionIndex, sessions, dispatch]);
+
   return (
     <div className="topbar">
       <div className="brand">
@@ -248,6 +277,18 @@ export function TopBar({
           <Hexagon />
         </span>
       </div>
+
+      {isMobile && sessions.length > 1 && (
+        <button
+          className="icon-btn topbar-session-nav"
+          onClick={goToPrevSession}
+          disabled={currentSessionIndex <= 0}
+          title="Sesión anterior"
+          type="button"
+        >
+          <ChevronLeft />
+        </button>
+      )}
 
       <div
         className="topbar-sessions"
@@ -261,6 +302,7 @@ export function TopBar({
         {sessions.map((session) => (
           <div
             key={session.id}
+            data-session-id={session.id}
             className={`session-chip ${activeSessionId === session.id ? 'active' : ''} ${tabDropTarget === session.id ? 'drop-target' : ''}`}
             draggable
             onDragStart={(event) => {
@@ -304,6 +346,18 @@ export function TopBar({
           </div>
         ))}
       </div>
+
+      {isMobile && sessions.length > 1 && (
+        <button
+          className="icon-btn topbar-session-nav"
+          onClick={goToNextSession}
+          disabled={currentSessionIndex < 0 || currentSessionIndex >= sessions.length - 1}
+          title="Sesión siguiente"
+          type="button"
+        >
+          <ChevronRight />
+        </button>
+      )}
 
       {activeSessionMenu && sessionMenuPosition && createPortal(
         <>
