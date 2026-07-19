@@ -183,7 +183,7 @@ psql "$DATABASE_URL" \
 El registro `/api/agents` debe contener **12 agentes canónicos**. Cada worker desplegado para ellos debe figurar `online` y con `last_seen` reciente (segundos); los hosts auxiliares se validan por separado.
 
 ### Web
-Login en `https://terminal.humanizar.cloud` con una cuenta administrada por el gestor de secretos.
+Login en `https://client-iota-three-42.vercel.app` con una cuenta administrada por el gestor de secretos. El dominio histórico `terminal.humanizar.cloud` pertenece a otro proyecto de Vercel y no debe usarse hasta transferirlo.
 
 ---
 
