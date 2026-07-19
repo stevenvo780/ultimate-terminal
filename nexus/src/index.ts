@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import app from './app';
 import { initSocket } from './socket';
 import { initDatabase } from './config/database';
+import { seedFleet } from './config/seed';
 import { UserModel } from './models/user.model';
 import { WorkerModel } from './models/worker.model';
 import { PaymentService } from './services/payment.service';
@@ -44,6 +45,7 @@ const parseDevWorkerSpecs = (): DevWorkerSpec[] => {
 const startServer = async () => {
     console.log('[Nexus] Initializing database...');
     await initDatabase();
+    await seedFleet();
     await WorkerModel.markAllOffline();
 
     const adminPassword = process.env.ADMIN_PASSWORD;

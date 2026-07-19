@@ -20,14 +20,14 @@ interface UseSocketReturn {
   nexusUrl: string;
   emit: (event: string, data?: unknown, callback?: (response: unknown) => void) => void;
   subscribe: (workerId: string) => void;
-  joinSession: (sessionId: string, cols: number, rows: number) => void;
-  leaveSession: (sessionId: string) => void;
+  joinSession: (workerId: string, sessionId: string, cols: number, rows: number) => void;
+  leaveSession: (workerId: string, sessionId: string) => void;
   execute: (workerId: string, sessionId: string, command: string) => void;
   resize: (workerId: string, sessionId: string, cols: number, rows: number) => void;
   createSession: (id: string, workerName: string, workerKey: string, displayName: string) => void;
-  closeSession: (sessionId: string) => void;
-  renameSession: (sessionId: string, newName: string) => void;
-  getSessionOutput: (sessionId: string, callback: (output: string) => void) => void;
+  closeSession: (workerId: string, sessionId: string) => void;
+  renameSession: (workerId: string, sessionId: string, newName: string) => void;
+  getSessionOutput: (workerId: string, sessionId: string, callback: (output: string) => void) => void;
 }
 
 export function useSocket(
@@ -40,7 +40,7 @@ export function useSocket(
     createdAt: number;
     lastActiveAt: number;
   }>) => void,
-  onSessionClosed?: (sessionId: string) => void
+  onSessionClosed?: (sessionId: string, workerId: string) => void
 ): UseSocketReturn {
   const dispatch = useAppDispatch();
   const token = useAppSelector((state) => state.auth.token);
@@ -83,8 +83,8 @@ export function useSocket(
       onSessionList?.(serverSessions);
     });
 
-    newSocket.on('session-closed', (data: { sessionId: string }) => {
-      onSessionClosed?.(data.sessionId);
+    newSocket.on('session-closed', (data: { sessionId: string; workerId: string }) => {
+      onSessionClosed?.(data.sessionId, data.workerId);
     });
 
     newSocket.on('output', (data: { workerId: string; sessionId?: string; data: string }) => {
@@ -157,12 +157,12 @@ export function useSocket(
     emit('subscribe', { workerId });
   }, [emit]);
 
-  const joinSession = useCallback((sessionId: string, cols: number, rows: number) => {
-    emit('join-session', { sessionId, cols, rows });
+  const joinSession = useCallback((workerId: string, sessionId: string, cols: number, rows: number) => {
+    emit('join-session', { workerId, sessionId, cols, rows });
   }, [emit]);
 
-  const leaveSession = useCallback((sessionId: string) => {
-    emit('leave-session', { sessionId });
+  const leaveSession = useCallback((workerId: string, sessionId: string) => {
+    emit('leave-session', { workerId, sessionId });
   }, [emit]);
 
   const execute = useCallback((workerId: string, sessionId: string, command: string) => {
@@ -177,16 +177,16 @@ export function useSocket(
     emit('create-session', { id, workerName, workerKey, displayName });
   }, [emit]);
 
-  const closeSession = useCallback((sessionId: string) => {
-    emit('close-session', { sessionId });
+  const closeSession = useCallback((workerId: string, sessionId: string) => {
+    emit('close-session', { workerId, sessionId });
   }, [emit]);
 
-  const renameSession = useCallback((sessionId: string, newName: string) => {
-    emit('rename-session', { sessionId, newName });
+  const renameSession = useCallback((workerId: string, sessionId: string, newName: string) => {
+    emit('rename-session', { workerId, sessionId, newName });
   }, [emit]);
 
-  const getSessionOutput = useCallback((sessionId: string, callback: (output: string) => void) => {
-    emit('get-session-output', { sessionId }, callback as (response: unknown) => void);
+  const getSessionOutput = useCallback((workerId: string, sessionId: string, callback: (output: string) => void) => {
+    emit('get-session-output', { workerId, sessionId }, callback as (response: unknown) => void);
   }, [emit]);
 
   const getSocket = useCallback(() => socketRef.current, []);

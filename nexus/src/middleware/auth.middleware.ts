@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, JwtPayload } from '../utils/jwt';
+import { UserModel } from '../models/user.model';
 
 declare global {
   namespace Express {
@@ -9,7 +10,7 @@ declare global {
   }
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -25,9 +26,22 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
 
   try {
     const payload = verifyToken(token);
-    req.user = payload;
+    const currentUser = await UserModel.findById(payload.userId);
+    if (!currentUser) {
+      res.status(401).json({ error: 'User invalid or no longer exists' });
+      return;
+    }
+    // Never authorize from role/tenant claims that may be stale for up to the
+    // JWT lifetime. Keep identity from the signed token, but refresh all mutable
+    // authorization fields from the database on every protected REST request.
+    req.user = {
+      userId: currentUser.id,
+      username: currentUser.username,
+      isAdmin: currentUser.is_admin === 1,
+      tenantId: currentUser.tenant_id ?? null,
+    };
     next();
-  } catch (err) {
+  } catch (_err) {
     res.status(401).json({ error: 'Invalid token' });
     return;
   }

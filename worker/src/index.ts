@@ -37,6 +37,16 @@ const API_KEY = process.env.API_KEY || process.env.WORKER_TOKEN || '';
 const WORKER_NAME = process.env.WORKER_NAME || os.hostname();
 const HEARTBEAT_MS = Number(process.env.WORKER_HEARTBEAT_MS || 5000);
 const AUTO_RESTART_SHELL = process.env.AUTO_RESTART_SHELL !== 'false';
+// Extensión "TUI del agente": si está seteado, una sesión cuyo id marca TUI
+// (contiene ':tui'/'-tui'/'_tui') spawnea este comando (p.ej. `openclaw chat`
+// para OpenClaw, `tmux attach -t <sesion>` para Claude Code) en vez del shell.
+const TUI_CMD = process.env.WORKER_TUI_CMD;
+// WORKER_TUI_ALWAYS=true → este worker es dedicado a la TUI: TODA sesión abre
+// la TUI del agente (worker "hegel-tui" aparte del worker de shell). Si no,
+// solo las sesiones cuyo id marca 'tui' abren la TUI (worker mixto).
+const TUI_ALWAYS = process.env.WORKER_TUI_ALWAYS === 'true';
+const isTuiSession = (sessionId: string) =>
+  !!TUI_CMD && (TUI_ALWAYS || /(?:^|[:_-])tui(?:[:_-]|$)/i.test(sessionId));
 const LOG_EXECUTE = process.env.UT_LOG_EXECUTE === 'true';
 const OUTPUT_FLUSH_MS = Math.max(1, Number(process.env.UT_OUTPUT_FLUSH_MS || 16));
 const OUTPUT_MAX_BUFFER = Math.max(512, Number(process.env.UT_OUTPUT_MAX_BUFFER || 8192));
@@ -331,6 +341,18 @@ function createShellForSession(
       COLORTERM: 'truecolor'
     };
     console.log(`[Worker] Spawning PTY for session ${sessionId} (${shellCmd}) with dimensions ${cols}x${rows}...`);
+  }
+
+  // TUI del agente: en vez del login-shell interactivo, ejecutar el comando de
+  // la TUI (openclaw chat / tmux attach ...). Se preserva el drop a targetUser.
+  if (isTuiSession(sessionId)) {
+    if (targetUser && canSu) {
+      shellCmd = '/bin/su';
+      shellArgs = ['-l', targetUser.username, '-s', targetUser.shell, '-c', `exec ${TUI_CMD}`];
+    } else {
+      shellArgs = ['-l', '-c', `exec ${TUI_CMD}`];
+    }
+    console.log(`[Worker] Session ${sessionId} → TUI del agente: ${TUI_CMD}`);
   }
 
   const shell = pty.spawn(shellCmd, shellArgs, {

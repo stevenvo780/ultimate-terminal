@@ -2,9 +2,21 @@
 import { Request, Response } from 'express';
 import { WorkerModel } from '../models/worker.model';
 import { UserModel } from '../models/user.model';
-import { workers as connectedWorkers } from '../socket';
+import {
+  evictUserSubscriptions,
+  invalidateWorkerAccessCache,
+  workers as connectedWorkers,
+} from '../socket';
 import { canCreateWorker, canShareWorker } from '../services/plan-limits';
 import type { Server } from 'socket.io';
+
+async function resolveRequester(userId: number) {
+  const user = await UserModel.findById(userId);
+  return {
+    user,
+    isGlobalAdmin: user?.is_admin === 1 && (user.tenant_id ?? null) === null,
+  };
+}
 
 export class WorkerController {
   static async list(req: Request, res: Response) {
@@ -30,7 +42,23 @@ export class WorkerController {
     if (!worker) { res.status(404).json({ error: 'Código inválido' }); return; }
 
     if (worker.owner_id !== req.user.userId) {
-      await WorkerModel.share(worker.id, req.user.userId, 'control');
+      // A join code is only a locator, never an authorization capability.
+      // Keep worker access tenant-local unless a global administrator performs
+      // the operation explicitly. Resolve both tenants from the DB so a stale
+      // JWT cannot retain access after a tenant reassignment.
+      const { user: requester, isGlobalAdmin } = await resolveRequester(req.user.userId);
+      if (!requester) { res.status(401).json({ error: 'Usuario no válido' }); return; }
+      if (!isGlobalAdmin) {
+        const owner = await UserModel.findById(worker.owner_id);
+        const requesterTenant = requester?.tenant_id ?? null;
+        const ownerTenant = owner?.tenant_id ?? null;
+        if (!requesterTenant || !ownerTenant || requesterTenant !== ownerTenant) {
+          res.status(403).json({ error: 'El worker pertenece a otro tenant' });
+          return;
+        }
+        await WorkerModel.share(worker.id, req.user.userId, 'control');
+        invalidateWorkerAccessCache(req.user.userId);
+      }
     }
 
     res.json({ success: true });
@@ -53,6 +81,7 @@ export class WorkerController {
     }
 
     const worker = await WorkerModel.create(req.user.userId, name);
+    invalidateWorkerAccessCache();
     res.json(worker);
   }
 
@@ -62,20 +91,25 @@ export class WorkerController {
 
     if (!targetUsername) { res.status(400).json({ error: 'Nombre de usuario requerido' }); return; }
 
+    const { user: requester, isGlobalAdmin } = await resolveRequester(req.user.userId);
+    if (!requester) { res.status(401).json({ error: 'Usuario no válido' }); return; }
+
     // Verificar que el plan permite compartir
-    const shareCheck = await canShareWorker(req.user.userId);
-    if (!shareCheck.allowed) {
-      res.status(403).json({
-        error: shareCheck.reason,
-        code: 'PLAN_LIMIT_SHARE',
-      });
-      return;
+    if (!isGlobalAdmin) {
+      const shareCheck = await canShareWorker(req.user.userId);
+      if (!shareCheck.allowed) {
+        res.status(403).json({
+          error: shareCheck.reason,
+          code: 'PLAN_LIMIT_SHARE',
+        });
+        return;
+      }
     }
 
     const worker = await WorkerModel.findById(workerId);
     if (!worker) { res.status(404).json({ error: 'Worker no encontrado' }); return; }
 
-    const canManage = worker.owner_id === req.user.userId || req.user.isAdmin;
+    const canManage = worker.owner_id === req.user.userId || isGlobalAdmin;
 
     if (!canManage) {
       res.status(403).json({ error: 'Solo el propietario o admin puede compartir' });
@@ -90,8 +124,21 @@ export class WorkerController {
       return;
     }
 
+    // A global admin can already access every worker. Letting it create a
+    // cross-tenant share would either bypass isolation or produce an inert
+    // share that the access model intentionally ignores. Scope the target to
+    // the worker owner's current tenant for every caller, including admins.
+    const owner = await UserModel.findById(worker.owner_id);
+    const ownerTenant = owner?.tenant_id ?? null;
+    const targetTenant = targetUser.tenant_id ?? null;
+    if (!ownerTenant || !targetTenant || ownerTenant !== targetTenant) {
+      res.status(403).json({ error: 'No puedes compartir workers con otro tenant' });
+      return;
+    }
+
     const enforcedPermission = 'control' as const;
     await WorkerModel.share(workerId, targetUser.id, enforcedPermission);
+    invalidateWorkerAccessCache(targetUser.id);
 
     // Notify target user via Socket.IO
     const io = req.app.get('io');
@@ -125,7 +172,9 @@ export class WorkerController {
     const worker = await WorkerModel.findById(workerId);
     if (!worker) { res.status(404).json({ error: 'Worker no encontrado' }); return; }
 
-    const canManage = worker.owner_id === req.user.userId || req.user.isAdmin;
+    const { user: requester, isGlobalAdmin } = await resolveRequester(req.user.userId);
+    if (!requester) { res.status(401).json({ error: 'Usuario no válido' }); return; }
+    const canManage = worker.owner_id === req.user.userId || isGlobalAdmin;
 
     if (!canManage) {
       res.status(403).json({ error: 'Acceso denegado' });
@@ -144,7 +193,9 @@ export class WorkerController {
     const worker = await WorkerModel.findById(workerId);
     if (!worker) { res.status(404).json({ error: 'Worker no encontrado' }); return; }
 
-    const canManage = worker.owner_id === req.user.userId || req.user.isAdmin;
+    const { user: requester, isGlobalAdmin } = await resolveRequester(req.user.userId);
+    if (!requester) { res.status(401).json({ error: 'Usuario no válido' }); return; }
+    const canManage = worker.owner_id === req.user.userId || isGlobalAdmin;
 
     if (!canManage) {
       res.status(403).json({ error: 'Solo el propietario o admin puede quitar acceso' });
@@ -161,6 +212,8 @@ export class WorkerController {
       res.status(404).json({ error: 'Compartición no encontrada' });
       return;
     }
+    const io = req.app.get('io') as Server | undefined;
+    evictUserSubscriptions(io, normalizedUserId, workerId);
     const shares = await WorkerModel.getShares(workerId);
     res.json({ success: true, shares });
   }
@@ -172,7 +225,9 @@ export class WorkerController {
     const worker = await WorkerModel.findById(id);
     if (!worker) { res.status(404).json({ error: 'Worker no encontrado' }); return; }
 
-    if (worker.owner_id !== req.user.userId && !req.user.isAdmin) {
+    const { user: requester, isGlobalAdmin } = await resolveRequester(req.user.userId);
+    if (!requester) { res.status(401).json({ error: 'Usuario no válido' }); return; }
+    if (worker.owner_id !== req.user.userId && !isGlobalAdmin) {
       res.status(403).json({ error: 'Acceso denegado' });
       return;
     }
@@ -188,6 +243,7 @@ export class WorkerController {
     }
 
     await WorkerModel.delete(id);
+    invalidateWorkerAccessCache();
     res.json({ success: true, disconnected: Boolean(connected) });
   }
 }

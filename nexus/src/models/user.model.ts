@@ -9,17 +9,18 @@ export interface User {
   salt: string;
   is_admin: number;
   created_at: string;
+  tenant_id?: string | null;
 }
 
 export class UserModel {
-  static async create(username: string, password: string, isAdmin: boolean = false): Promise<User> {
+  static async create(username: string, password: string, isAdmin: boolean = false, tenantId?: string | null): Promise<User> {
     const { hash, salt } = hashPassword(password);
     const createdAt = new Date().toISOString();
 
     const result = await db.run(`
-      INSERT INTO users (username, password_hash, salt, is_admin, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `, [username, hash, salt, isAdmin ? 1 : 0, createdAt]);
+      INSERT INTO users (username, password_hash, salt, is_admin, created_at, tenant_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [username, hash, salt, isAdmin ? 1 : 0, createdAt, tenantId ?? null]);
 
     const id = Number(result.lastInsertId);
 
@@ -29,8 +30,13 @@ export class UserModel {
       password_hash: hash,
       salt,
       is_admin: isAdmin ? 1 : 0,
-      created_at: createdAt
+      created_at: createdAt,
+      tenant_id: tenantId ?? null
     };
+  }
+
+  static async updateTenant(id: number, tenantId: string | null): Promise<void> {
+    await db.run('UPDATE users SET tenant_id = ? WHERE id = ?', [tenantId, id]);
   }
 
   static async findByUsername(username: string): Promise<User | undefined> {

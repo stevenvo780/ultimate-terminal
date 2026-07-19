@@ -8,6 +8,7 @@ import workersReducer, { resetWorkersState } from './slices/workersSlice';
 import sessionsReducer, { resetSessionsState } from './slices/sessionsSlice';
 import uiReducer from './slices/uiSlice';
 import commandsReducer, { resetCommandsState } from './slices/commandsSlice';
+import agentsReducer, { resetAgentsState } from './slices/agentsSlice';
 import { setConnectionState } from './slices/connectionSlice';
 
 const rootReducer = combineReducers({
@@ -17,6 +18,7 @@ const rootReducer = combineReducers({
   sessions: sessionsReducer,
   ui: uiReducer,
   commands: commandsReducer,
+  agents: agentsReducer,
 });
 
 const persistConfig = {
@@ -51,6 +53,7 @@ export const logoutAndReset = (message?: string): AppThunk => (dispatch) => {
   dispatch(resetSessionsState());
   dispatch(resetWorkersState());
   dispatch(resetCommandsState());
+  dispatch(resetAgentsState());
   dispatch(setConnectionState('disconnected'));
   persistor.purge();
 };
@@ -62,3 +65,4 @@ export * from './slices/workersSlice';
 export * from './slices/sessionsSlice';
 export * from './slices/uiSlice';
 export * from './slices/commandsSlice';
+export * from './slices/agentsSlice';

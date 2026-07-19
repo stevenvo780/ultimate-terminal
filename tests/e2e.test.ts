@@ -3,13 +3,22 @@ import { io as Client } from 'socket.io-client';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 
 const NEXUS_PORT = 3003;
 const NEXUS_URL = `http://localhost:${NEXUS_PORT}`;
 const ADMIN_PASSWORD = 'test-pass-123';
 const WORKER_TOKEN = 'worker-token-test';
 const JWT_SECRET = 'test-secret-token';
-const DATA_DIR = path.resolve(__dirname, '..', `.qodo-${NEXUS_PORT}`);
+let dataDir: string;
+
+function isolatedSqliteEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  // Host credentials must not override this test's isolated worker/SQLite.
+  delete env.API_KEY;
+  delete env.DATABASE_URL;
+  return env;
+}
 
 async function waitForServer(url: string, timeoutMs = 10000) {
   const start = Date.now();
@@ -30,17 +39,17 @@ describe('Ultimate Terminal E2E', () => {
   let clientSocket: any;
 
   beforeAll(async () => {
-    await fs.rm(DATA_DIR, { force: true, recursive: true });
+    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ultimate-terminal-e2e-'));
 
     nexusProcess = spawn('npx', ['ts-node', 'nexus/src/index.ts'], {
       env: {
-        ...process.env,
+        ...isolatedSqliteEnv(),
         PORT: NEXUS_PORT.toString(),
         NEXUS_JWT_SECRET: JWT_SECRET,
         ADMIN_PASSWORD,
         WORKER_TOKEN,
         CLIENT_ORIGIN: '*',
-        NEXUS_DATA_DIR: DATA_DIR
+        NEXUS_DATA_DIR: dataDir
       },
       cwd: path.resolve(__dirname, '..'),
       stdio: 'pipe'
@@ -49,7 +58,7 @@ describe('Ultimate Terminal E2E', () => {
     await waitForServer(NEXUS_URL);
 
     workerProcess = spawn('npx', ['ts-node', 'worker/src/index.ts'], {
-      env: { ...process.env, NEXUS_URL, WORKER_NAME: 'Test-Worker', WORKER_TOKEN },
+      env: { ...isolatedSqliteEnv(), NEXUS_URL, WORKER_NAME: 'Test-Worker', WORKER_TOKEN },
       cwd: path.resolve(__dirname, '..'),
       stdio: 'pipe'
     });
@@ -59,10 +68,11 @@ describe('Ultimate Terminal E2E', () => {
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }, 20000);
 
-  afterAll(() => {
+  afterAll(async () => {
     nexusProcess.kill();
     workerProcess.kill();
     if (clientSocket) clientSocket.disconnect();
+    await fs.rm(dataDir, { force: true, recursive: true });
   });
 
   it('should allow a client to connect and receive worker list', async () => {

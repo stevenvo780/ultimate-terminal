@@ -1,6 +1,8 @@
 import { useAppDispatch, useAppSelector } from '../../../store/hooks';
 import { toggleSidebar, setEditingWorker, setShowWorkerModal, setShowMobileSidebar } from '../../../store';
+import { useResizableSidebar } from '../../../hooks';
 import { WorkerList } from './WorkerList';
+import { AgentList } from './AgentList';
 import { ChevronLeft, ChevronRight, Link2, Plus, X } from 'lucide-react';
 import './Sidebar.css';
 
@@ -18,6 +20,7 @@ export function Sidebar({
   const dispatch = useAppDispatch();
   const sidebarCollapsed = useAppSelector((state) => state.ui.sidebarCollapsed);
   const showMobileSidebar = useAppSelector((state) => state.ui.showMobileSidebar);
+  const { width: sidebarWidth, isResizing, startResizing } = useResizableSidebar();
   const handleCreateWorker = () => {
     dispatch(setEditingWorker(null));
     dispatch(setShowWorkerModal(true));
@@ -40,9 +43,12 @@ export function Sidebar({
   return (
     <>
       {/* Desktop sidebar */}
-      <div className={`sidebar sidebar-desktop ${sidebarCollapsed ? 'collapsed' : ''}`}>
+      <div
+        className={`sidebar sidebar-desktop ${sidebarCollapsed ? 'collapsed' : ''} ${isResizing ? 'resizing' : ''}`}
+        style={sidebarCollapsed ? undefined : { width: sidebarWidth }}
+      >
         <div className="sidebar-header">
-          <h3>Workers</h3>
+          <h3>Agentes & Workers</h3>
           <div className="sidebar-header-actions">
             {!sidebarCollapsed && (
               <button
@@ -77,11 +83,28 @@ export function Sidebar({
 
         {!sidebarCollapsed && (
           <div className="sidebar-content">
+            <AgentList
+              onOpenTui={onSelectWorker}
+              onOpenShell={onSelectWorker}
+            />
             <WorkerList
               onSelectWorker={onSelectWorker}
               onNewSession={onNewSession}
             />
           </div>
+        )}
+
+        {/* Resize handle — drag to change the sidebar width */}
+        {!sidebarCollapsed && (
+          <div
+            className={`sidebar-resize-handle ${isResizing ? 'active' : ''}`}
+            onMouseDown={startResizing}
+            onTouchStart={startResizing}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionar barra lateral"
+            title="Arrastrar para redimensionar"
+          />
         )}
       </div>
 
@@ -91,7 +114,7 @@ export function Sidebar({
       )}
       <div className={`mobile-sidebar-drawer ${showMobileSidebar ? 'open' : ''}`}>
         <div className="mobile-sidebar-header">
-          <h3>Workers</h3>
+          <h3>Agentes & Workers</h3>
           <div className="mobile-sidebar-header-actions">
             <button
               className="worker-join-btn"
@@ -120,6 +143,10 @@ export function Sidebar({
           </div>
         </div>
         <div className="mobile-sidebar-content">
+          <AgentList
+            onOpenTui={handleSelectWorkerMobile}
+            onOpenShell={handleSelectWorkerMobile}
+          />
           <WorkerList
             onSelectWorker={handleSelectWorkerMobile}
             onNewSession={handleNewSessionMobile}

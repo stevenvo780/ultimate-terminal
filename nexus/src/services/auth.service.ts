@@ -27,7 +27,8 @@ export class AuthService {
     const payload: JwtPayload = {
       userId: user.id,
       username: user.username,
-      isAdmin: user.is_admin === 1
+      isAdmin: user.is_admin === 1,
+      tenantId: user.tenant_id ?? null
     };
 
     return { token: signToken(payload), user: payload };
@@ -48,7 +49,8 @@ export class AuthService {
     const payload: JwtPayload = {
       userId: user.id,
       username: user.username,
-      isAdmin: user.is_admin === 1
+      isAdmin: user.is_admin === 1,
+      tenantId: user.tenant_id ?? null
     };
 
     return { token: signToken(payload), user: payload };

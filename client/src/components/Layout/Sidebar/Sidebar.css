@@ -14,6 +14,45 @@
   width: 48px;
 }
 
+/* Desktop sidebar anchors the resize handle */
+.sidebar.sidebar-desktop {
+  position: relative;
+}
+
+/* While actively dragging, kill the width transition so resize is 1:1 */
+.sidebar.resizing {
+  transition: none;
+}
+
+/* ===== Resize handle ===== */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 3px;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 150ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle.active::after {
+  background: rgba(96, 165, 250, 0.55);
+}
+
 .sidebar-header {
   padding: 14px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);

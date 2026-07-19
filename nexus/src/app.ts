@@ -6,6 +6,9 @@ import { spawn } from 'child_process';
 import authRoutes from './routes/auth.routes';
 import workerRoutes from './routes/worker.routes';
 import paymentRoutes from './routes/payment.routes';
+import agentRoutes from './routes/agent.routes';
+import tenantRoutes from './routes/tenant.routes';
+import { evictUserSubscriptions } from './socket';
 
 const app = express();
 
@@ -29,19 +32,30 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/workers', workerRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/agents', agentRoutes);
+app.use('/api/tenants', tenantRoutes);
 
 // --- Admin bootstrap endpoint (protected by ADMIN_PASSWORD) ---
 app.post('/api/admin/upgrade-plan', async (req, res) => {
-  const { adminPassword, username, plan, makeAdmin } = req.body;
+  const { adminPassword, username, plan, makeAdmin, tenant } = req.body;
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected || adminPassword !== expected) {
     res.status(403).json({ error: 'Forbidden' }); return;
   }
   try {
     const dbMod = (await import('./config/database')).default;
-    await dbMod.run("UPDATE users SET plan = ?, is_admin = ? WHERE username = ?",
-      [plan || 'enterprise', makeAdmin ? 1 : 0, username]);
-    const user = await dbMod.get<any>("SELECT id, username, is_admin, plan FROM users WHERE username = ?", [username]);
+    if (tenant !== undefined) {
+      // tenant: string para asignar, null para desasignar (global/admin).
+      await dbMod.run("UPDATE users SET plan = ?, is_admin = ?, tenant_id = ? WHERE username = ?",
+        [plan || 'enterprise', makeAdmin ? 1 : 0, tenant, username]);
+    } else {
+      await dbMod.run("UPDATE users SET plan = ?, is_admin = ? WHERE username = ?",
+        [plan || 'enterprise', makeAdmin ? 1 : 0, username]);
+    }
+    const user = await dbMod.get<any>("SELECT id, username, is_admin, plan, tenant_id FROM users WHERE username = ?", [username]);
+    if (user?.id) {
+      evictUserSubscriptions(app.get('io'), Number(user.id));
+    }
     res.json({ success: true, user });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

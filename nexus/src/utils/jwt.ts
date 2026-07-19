@@ -17,6 +17,7 @@ export interface JwtPayload {
   userId: number;
   username: string;
   isAdmin: boolean;
+  tenantId?: string | null;
 }
 
 export function signToken(payload: JwtPayload): string {

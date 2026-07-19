@@ -3,13 +3,22 @@ import { io as Client } from 'socket.io-client';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 
 const NEXUS_PORT = 3004;
 const NEXUS_URL = `http://localhost:${NEXUS_PORT}`;
 const ADMIN_PASSWORD = 'test-pass-multi-456';
 const WORKER_TOKEN = 'worker-token-test-multi';
 const JWT_SECRET = 'test-secret-token-multi';
-const DATA_DIR = path.resolve(__dirname, '..', `.qodo-${NEXUS_PORT}`);
+let dataDir: string;
+
+function isolatedSqliteEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  // Host credentials must not override this test's isolated worker/SQLite.
+  delete env.API_KEY;
+  delete env.DATABASE_URL;
+  return env;
+}
 
 async function waitForServer(url: string, timeoutMs = 10000) {
   const start = Date.now();
@@ -32,17 +41,17 @@ describe('Multiple Clients - Independent Terminal Views', () => {
   let token: string;
 
   beforeAll(async () => {
-    await fs.rm(DATA_DIR, { force: true, recursive: true });
+    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ultimate-terminal-multi-'));
 
     nexusProcess = spawn('npx', ['ts-node', 'nexus/src/index.ts'], {
       env: {
-        ...process.env,
+        ...isolatedSqliteEnv(),
         PORT: NEXUS_PORT.toString(),
         NEXUS_JWT_SECRET: JWT_SECRET,
         ADMIN_PASSWORD,
         WORKER_TOKEN,
         CLIENT_ORIGIN: '*',
-        NEXUS_DATA_DIR: DATA_DIR
+        NEXUS_DATA_DIR: dataDir
       },
       cwd: path.resolve(__dirname, '..'),
       stdio: 'pipe'
@@ -51,7 +60,7 @@ describe('Multiple Clients - Independent Terminal Views', () => {
     await waitForServer(NEXUS_URL);
 
     workerProcess = spawn('npx', ['ts-node', 'worker/src/index.ts'], {
-      env: { ...process.env, NEXUS_URL, WORKER_NAME: 'Test-Multi-Worker', WORKER_TOKEN },
+      env: { ...isolatedSqliteEnv(), NEXUS_URL, WORKER_NAME: 'Test-Multi-Worker', WORKER_TOKEN },
       cwd: path.resolve(__dirname, '..'),
       stdio: 'pipe'
     });
@@ -69,11 +78,12 @@ describe('Multiple Clients - Independent Terminal Views', () => {
     token = data.token;
   }, 20000);
 
-  afterAll(() => {
+  afterAll(async () => {
     nexusProcess.kill();
     workerProcess.kill();
     if (client1Socket) client1Socket.disconnect();
     if (client2Socket) client2Socket.disconnect();
+    await fs.rm(dataDir, { force: true, recursive: true });
   });
 
   it('should allow two clients with different terminal sizes', async () => {

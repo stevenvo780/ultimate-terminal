@@ -82,10 +82,13 @@ export function TopBar({
 
   useEffect(() => {
     if (!showMobileSidebar) return;
-    setShowMobileMenu(false);
-    setSessionMenuId(null);
-    dispatch(setShowSettings(false));
-    dispatch(setShowUserMenu(false));
+    const timeoutId = window.setTimeout(() => {
+      setShowMobileMenu(false);
+      setSessionMenuId(null);
+      dispatch(setShowSettings(false));
+      dispatch(setShowUserMenu(false));
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [dispatch, showMobileSidebar]);
 
   const closeTransientMenus = useCallback(() => {

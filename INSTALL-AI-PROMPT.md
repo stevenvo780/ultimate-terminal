@@ -75,16 +75,16 @@ sudo loginctl enable-linger stev
 
 | # | Worker | Acceso SSH | Tipo install | API_KEY (token) |
 |---|--------|------------|--------------|-----------------|
-| 1 | `vpn-principal` | `humanizar@148.230.88.162 -p 49222` | sudo | `721c0b2b60a701a7775b6b78f73570cc492e29a602933c14e54c8907f5d6c7a1` |
-| 2 | `stev-server` | `stev@100.98.8.227` | sudo | `dee5c12ca38861dc1d8514728ea7ea5523e5ddb4d957de56e3d2fcbcdcfdedb3` |
-| 3 | `humanizar1` | `humanizar1` (ProxyJump vía `servidor-i3`) | sudo | `1cf1eed7b60976f1a496d745cc36215afbb504b52dc38ce403a8b99ae0d2d374` |
-| 4 | `humanizar2` | `humanizar@100.98.5.11` | sudo | `226d017a01be7d8d43d05e3999e88b06359634fa831dc64731aa7cfd43182d29` |
-| 5 | `servidor-i3` | `humanizar@100.98.143.113` | sudo | `539723634f82826533fb4acd1fa3b7511ec730e21f0be1012b73acdc07c66d7d` |
-| 6 | `nass-stev` | `nass@100.98.67.189` | sudo | `4cab9ab30746a3fcfbf41c15811f0dd8cf6ad8f72b9d8a5de72368ec7f535817` |
-| 7 | `pc-stev` | `stev@100.98.81.177` | **USER_INSTALL=1** | `523edea5378e21b1fe2195fb9b09261d18bf264aa0c6815192752f8c71e019e0` |
-| 8 | `ws-humanizar` | `operador@10.88.88.11` (VM en pc-stev) | sudo | `656a171234643f488503175937295aff7a3f4dade2f3085b0109f1c63dca94d8` |
-| 9 | `ws-personal` | `operador@…` (VM en pc-stev) | sudo | `745ec8f1fefb943dd049223f8a52ffedafc797b5786c0c812fe82506b3338b0a` |
-| 10 | `ws-indotel` | `operador@10.88.88.12` (VM en pc-stev) | sudo | `f478ec9df6cfc70c76d421d534e98767a13ec4e1b8bcbda991c7f02c25b5cbac` |
+| 1 | `vpn-principal` | `humanizar@148.230.88.162 -p 49222` | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 2 | `stev-server` | `stev@100.98.8.227` | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 3 | `humanizar1` | `humanizar1` (ProxyJump vía `servidor-i3`) | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 4 | `humanizar2` | `humanizar@100.98.5.11` | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 5 | `servidor-i3` | `humanizar@100.98.143.113` | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 6 | `nass-stev` | `nass@100.98.67.189` | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 7 | `pc-stev` | `stev@100.98.81.177` | **USER_INSTALL=1** | `<REDACTED_WORKER_API_KEY>` |
+| 8 | `ws-humanizar` | `operador@10.88.88.11` (VM en pc-stev) | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 9 | `ws-personal` | `operador@…` (VM en pc-stev) | sudo | `<REDACTED_WORKER_API_KEY>` |
+| 10 | `ws-indotel` | `operador@10.88.88.12` (VM en pc-stev) | sudo | `<REDACTED_WORKER_API_KEY>` |
 
 ---
 
@@ -108,53 +108,53 @@ ssh vpn-principal '
 
 ### 1 — vpn-principal
 ```bash
-ssh vpn-principal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=vpn-principal bash -s -- 721c0b2b60a701a7775b6b78f73570cc492e29a602933c14e54c8907f5d6c7a1'
+ssh vpn-principal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=vpn-principal bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 2 — stev-server
 ```bash
-ssh stev-server 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=stev-server bash -s -- dee5c12ca38861dc1d8514728ea7ea5523e5ddb4d957de56e3d2fcbcdcfdedb3'
+ssh stev-server 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=stev-server bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 3 — humanizar1
 ```bash
-ssh humanizar1 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar1 bash -s -- 1cf1eed7b60976f1a496d745cc36215afbb504b52dc38ce403a8b99ae0d2d374'
+ssh humanizar1 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar1 bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 4 — humanizar2
 ```bash
-ssh humanizar2 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar2 bash -s -- 226d017a01be7d8d43d05e3999e88b06359634fa831dc64731aa7cfd43182d29'
+ssh humanizar2 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=humanizar2 bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 5 — servidor-i3
 ```bash
-ssh servidor-i3 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=servidor-i3 bash -s -- 539723634f82826533fb4acd1fa3b7511ec730e21f0be1012b73acdc07c66d7d'
+ssh servidor-i3 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=servidor-i3 bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 6 — nass-stev
 ```bash
-ssh nass-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=nass-stev bash -s -- 4cab9ab30746a3fcfbf41c15811f0dd8cf6ad8f72b9d8a5de72368ec7f535817'
+ssh nass-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=nass-stev bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 7 — pc-stev (USER_INSTALL=1, sin sudo)
 ```bash
-ssh pc-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | USER_INSTALL=1 NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=pc-stev bash -s -- 523edea5378e21b1fe2195fb9b09261d18bf264aa0c6815192752f8c71e019e0'
+ssh pc-stev 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | USER_INSTALL=1 NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=pc-stev bash -s -- <REDACTED_WORKER_API_KEY>'
 ssh pc-stev 'sudo loginctl enable-linger stev'   # solo una vez
 ```
 
 ### 8 — ws-humanizar
 ```bash
-ssh ws-humanizar 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-humanizar bash -s -- 656a171234643f488503175937295aff7a3f4dade2f3085b0109f1c63dca94d8'
+ssh ws-humanizar 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-humanizar bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 9 — ws-personal
 ```bash
-ssh ws-personal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-personal bash -s -- 745ec8f1fefb943dd049223f8a52ffedafc797b5786c0c812fe82506b3338b0a'
+ssh ws-personal 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-personal bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ### 10 — ws-indotel
 ```bash
-ssh ws-indotel 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-indotel bash -s -- f478ec9df6cfc70c76d421d534e98767a13ec4e1b8bcbda991c7f02c25b5cbac'
+ssh ws-indotel 'curl -fsSL https://raw.githubusercontent.com/stevenvo780/ultimate-terminal/main/packaging/universal_install.sh | sudo NEXUS_URL=https://terminal.humanizar-dev.cloud WORKER_NAME=ws-indotel bash -s -- <REDACTED_WORKER_API_KEY>'
 ```
 
 ---
@@ -174,16 +174,16 @@ ssh pc-stev 'systemctl --user status ultimate-terminal-worker --no-pager -l | he
 
 Debe aparecer `[Worker] Connected to Nexus.` en los logs y status `active (running)`.
 
-### Global (desde vpn-principal o cualquier host con red al pooler de Neon)
+### Global (desde un host autorizado)
+La URL de PostgreSQL debe inyectarse desde el gestor de secretos; nunca se documenta ni se guarda en Git.
 ```bash
-PGPASSWORD='npg_NEPhH1K6OzMk' psql \
-  'postgresql://neondb_owner@ep-orange-pond-ah5yjzma-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require' \
+psql "$DATABASE_URL" \
   -c "SELECT name, status, to_timestamp(last_seen/1000) AS last_seen FROM workers ORDER BY name;"
 ```
-Debe haber **10 filas** con `status = online` y `last_seen` reciente (segundos).
+El registro `/api/agents` debe contener **12 agentes canónicos**. Cada worker desplegado para ellos debe figurar `online` y con `last_seen` reciente (segundos); los hosts auxiliares se validan por separado.
 
 ### Web
-Login en `https://terminal.humanizar.cloud` con usuario `stev` (o admin fallback `admin` / `AdminLocal123!`) y verificar que los 10 workers aparezcan online en la UI.
+Login en `https://terminal.humanizar.cloud` con una cuenta administrada por el gestor de secretos.
 
 ---
 

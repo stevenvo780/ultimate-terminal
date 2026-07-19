@@ -8,6 +8,8 @@ import {
   setConnectionState,
   setWorkers,
   addWorker,
+  setAgents,
+  setTenants,
   setCurrentUser,
   logoutAndReset,
   setNeedsSetup,
@@ -96,7 +98,13 @@ function AppContent() {
 
   const [notification, setNotification] = useState<{ title: string; message: string } | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [paymentReturnStatus, setPaymentReturnStatus] = useState<'success' | 'failure' | 'pending' | null>(null);
+  const [paymentReturnStatus, setPaymentReturnStatus] = useState<'success' | 'failure' | 'pending' | null>(() => {
+    const path = window.location.pathname;
+    if (path === '/payment/success') return 'success';
+    if (path === '/payment/failure') return 'failure';
+    if (path === '/payment/pending') return 'pending';
+    return null;
+  });
 
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [instancesVersion, setInstancesVersion] = useState(0);
@@ -439,7 +447,7 @@ function AppContent() {
 
     setTimeout(() => handleResize(), 100);
     return instance;
-  }, [dispatch, normalizeWorkerKey, getAdaptiveFontSize, bumpInstancesVersion]);
+  }, [dispatch, normalizeWorkerKey, getAdaptiveFontSize, bumpInstancesVersion, queueInput]);
 
   // Close session
   const handleCloseSession = useCallback((sessionId: string) => {
@@ -448,6 +456,7 @@ function AppContent() {
     setTimeout(() => closedSessionIdsRef.current.delete(sessionId), 15000);
 
     const instance = terminalInstancesRef.current.get(sessionId);
+    const workerId = instance?.workerId ?? sessions.find((session) => session.id === sessionId)?.workerId;
     if (instance) {
       window.removeEventListener('resize', instance.resizeHandler);
       instance.terminal.dispose();
@@ -460,9 +469,9 @@ function AppContent() {
     delete outputBufferRef.current[sessionId];
     delete terminalWriteBufferRef.current[sessionId];
     delete inputBufferRef.current[sessionId];
-    socketRef.current?.emit('close-session', { sessionId });
+    if (workerId) socketRef.current?.emit('close-session', { workerId, sessionId });
     dispatch(removeSession(sessionId));
-  }, [dispatch, bumpInstancesVersion]);
+  }, [dispatch, bumpInstancesVersion, sessions]);
 
   // Select worker and create/focus session
   const handleSelectWorker = useCallback((workerId: string) => {
@@ -512,6 +521,35 @@ function AppContent() {
       if (!res.ok) return;
       const list = await res.json();
       dispatch(setWorkers(list));
+    } catch {
+      // ignore refresh errors
+    }
+  }, [token, dispatch]);
+
+  // Registry de la flota (DB-backed): agentes + tenants, tenant-scoped por el server.
+  const refreshAgents = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${NEXUS_URL}/api/agents`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const list = await res.json();
+      dispatch(setAgents(Array.isArray(list) ? list : []));
+    } catch {
+      // ignore refresh errors
+    }
+  }, [token, dispatch]);
+
+  const refreshTenants = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${NEXUS_URL}/api/tenants`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const list = await res.json();
+      dispatch(setTenants(Array.isArray(list) ? list : []));
     } catch {
       // ignore refresh errors
     }
@@ -610,10 +648,17 @@ function AppContent() {
   // Rename session
   const handleRenameSave = useCallback((newName: string) => {
     if (renamingSessionId && newName.trim()) {
+      const workerId = sessions.find((session) => session.id === renamingSessionId)?.workerId;
       dispatch(updateSession({ id: renamingSessionId, displayName: newName.trim() }));
-      socketRef.current?.emit('rename-session', { sessionId: renamingSessionId, newName: newName.trim() });
+      if (workerId) {
+        socketRef.current?.emit('rename-session', {
+          workerId,
+          sessionId: renamingSessionId,
+          newName: newName.trim(),
+        });
+      }
     }
-  }, [renamingSessionId, dispatch]);
+  }, [renamingSessionId, dispatch, sessions]);
 
   // Initialize socket
   useEffect(() => {
@@ -626,6 +671,10 @@ function AppContent() {
       .then(res => { if (!res.ok) throw new Error('Invalid token'); return res.json(); })
       .then((data) => {
         if (data.user) dispatch(setCurrentUser(data.user));
+
+        // Cargar el registry DB-backed (agentes + tenants), tenant-scoped en el server.
+        refreshAgents();
+        refreshTenants();
 
         const socket = io(NEXUS_URL, {
           auth: { token, type: 'client' },
@@ -650,10 +699,10 @@ function AppContent() {
         socket.on('output', (data: { workerId: string; sessionId?: string; data: string }) => {
           if (data.sessionId) {
             const instance = terminalInstancesRef.current.get(data.sessionId);
-            if (instance) {
+            if (instance?.workerId === data.workerId) {
               queueTerminalWrite(data.sessionId, data.data);
             }
-            if (sessionsRef.current.some((s) => s.id === data.sessionId)) {
+            if (sessionsRef.current.some((s) => s.id === data.sessionId && s.workerId === data.workerId)) {
               queueOutput(data.sessionId, data.data);
             }
             return;
@@ -703,8 +752,10 @@ function AppContent() {
           });
         });
 
-        socket.on('session-closed', (data: { sessionId: string }) => {
+        socket.on('session-closed', (data: { sessionId: string; workerId: string }) => {
           // A session was closed (possibly from another device)
+          const currentSession = sessionsRef.current.find((session) => session.id === data.sessionId);
+          if (!currentSession || currentSession.workerId !== data.workerId) return;
           closedSessionIdsRef.current.add(data.sessionId);
           setTimeout(() => closedSessionIdsRef.current.delete(data.sessionId), 15000);
 
@@ -730,7 +781,7 @@ function AppContent() {
       });
 
     return () => { socketRef.current?.disconnect(); };
-  }, [token, dispatch, queueOutput, queueTerminalWrite]);
+  }, [token, dispatch, queueOutput, queueTerminalWrite, refreshAgents, refreshTenants, bumpInstancesVersion]);
 
   useEffect(() => {
     if (!token) {
@@ -782,7 +833,7 @@ function AppContent() {
       joinedSessionIdsRef.current.add(session.id);
 
       const cachedOutput = sessionOutputRef.current[session.id] || '';
-      socket.emit('get-session-output', { sessionId: session.id }, (output: string) => {
+      socket.emit('get-session-output', { workerId: session.workerId, sessionId: session.id }, (output: string) => {
         if (!output) return;
         if (output === cachedOutput) return;
         const instance = terminalInstancesRef.current.get(session.id);
@@ -808,14 +859,7 @@ function AppContent() {
   // Payment return URL detection
   useEffect(() => {
     const path = window.location.pathname;
-    if (path === '/payment/success') {
-      setPaymentReturnStatus('success');
-      window.history.replaceState({}, '', '/');
-    } else if (path === '/payment/failure') {
-      setPaymentReturnStatus('failure');
-      window.history.replaceState({}, '', '/');
-    } else if (path === '/payment/pending') {
-      setPaymentReturnStatus('pending');
+    if (path === '/payment/success' || path === '/payment/failure' || path === '/payment/pending') {
       window.history.replaceState({}, '', '/');
     }
   }, []);

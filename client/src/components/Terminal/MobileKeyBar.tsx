@@ -69,14 +69,14 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
     if (!visible) return;
     const vv = window.visualViewport;
     if (!vv) return;
+    const bar = barRef.current;
+    if (!bar) return;
 
     let frame = 0;
     const update = () => {
       frame = 0;
-      const el = barRef.current;
-      if (!el) return;
       const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      el.style.bottom = `${offset}px`;
+      bar.style.bottom = `${offset}px`;
     };
     const schedule = () => {
       if (frame) return;
@@ -90,8 +90,7 @@ export function MobileKeyBar({ onKey, visible }: MobileKeyBarProps) {
       vv.removeEventListener('resize', schedule);
       vv.removeEventListener('scroll', schedule);
       if (frame) cancelAnimationFrame(frame);
-      const el = barRef.current;
-      if (el) el.style.bottom = '';
+      bar.style.bottom = '';
     };
   }, [visible]);
 

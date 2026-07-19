@@ -4,6 +4,7 @@ import { verifyToken, JwtPayload } from './utils/jwt';
 import { WorkerModel, Worker } from './models/worker.model';
 import { UserModel } from './models/user.model';
 import { getUserPlan, canOpenSession } from './services/plan-limits';
+import { OrderedRelayQueue } from './services/ordered-relay';
 import db from './config/database';
 
 /**
@@ -17,7 +18,7 @@ interface SocketData {
 
 export const workers: Map<string, Worker & { socketId: string }> = new Map();
 
-const applyRuntimeWorkerStatus = <T extends Worker>(workerList: T[]): Array<T & { status: 'online' | 'offline' }> => {
+const applyRuntimeWorkerStatus = <T extends Pick<Worker, 'id' | 'status'>>(workerList: T[]): Array<T & { status: 'online' | 'offline' }> => {
   return workerList.map((worker) => ({
     ...worker,
     status: workers.has(worker.id) ? 'online' : 'offline',
@@ -38,8 +39,14 @@ interface ActiveSession {
   lastActive: number;
   creatorUserId?: number;
 }
+interface PendingOutput {
+  workerId: string;
+  sessionId: string;
+  output: string;
+}
 const activeSessions: Map<string, ActiveSession> = new Map();
 const sessionSubscribers: Map<string, Set<string>> = new Map();
+const outputRelay = new OrderedRelayQueue<PendingOutput>();
 const SESSION_LIST_DEBOUNCE_MS = Number(process.env.SESSION_LIST_DEBOUNCE_MS || 500);
 const ACCESS_CACHE_TTL_MS = Number(process.env.ACCESS_CACHE_TTL_MS || 2000);
 let sessionListDirty = false;
@@ -53,33 +60,64 @@ const normalizeSessionId = (sessionId?: string) => {
   return trimmed && trimmed.length > 0 ? trimmed : 'default';
 };
 
-const addSessionSubscriber = (sessionId: string, socketId: string) => {
-  const set = sessionSubscribers.get(sessionId) || new Set<string>();
+const addSessionSubscriber = (workerId: string, sessionId: string, socketId: string) => {
+  const key = sessionKey(workerId, sessionId);
+  const set = sessionSubscribers.get(key) || new Set<string>();
   set.add(socketId);
-  sessionSubscribers.set(sessionId, set);
+  sessionSubscribers.set(key, set);
 };
 
-const removeSessionSubscriber = (sessionId: string, socketId: string) => {
-  const set = sessionSubscribers.get(sessionId);
+const removeSessionSubscriber = (workerId: string, sessionId: string, socketId: string) => {
+  const key = sessionKey(workerId, sessionId);
+  const set = sessionSubscribers.get(key);
   if (!set) return;
   set.delete(socketId);
   if (set.size === 0) {
-    sessionSubscribers.delete(sessionId);
+    sessionSubscribers.delete(key);
   }
 };
 
 const removeSocketFromAllSessions = (socketId: string) => {
-  const removedSessions: string[] = [];
-  for (const [sessionId, set] of sessionSubscribers.entries()) {
+  const removedSessionKeys: string[] = [];
+  for (const [key, set] of sessionSubscribers.entries()) {
     if (set.has(socketId)) {
       set.delete(socketId);
-      removedSessions.push(sessionId);
+      removedSessionKeys.push(key);
       if (set.size === 0) {
-        sessionSubscribers.delete(sessionId);
+        sessionSubscribers.delete(key);
       }
     }
   }
-  return removedSessions;
+  return removedSessionKeys;
+};
+
+export const invalidateWorkerAccessCache = (userId?: number): void => {
+  if (userId === undefined) {
+    workerAccessCache.clear();
+    return;
+  }
+  workerAccessCache.delete(userId);
+};
+
+export const evictUserSubscriptions = (
+  io: Server | undefined,
+  userId: number,
+  workerId?: string
+): void => {
+  invalidateWorkerAccessCache(userId);
+  if (!io) return;
+  for (const [key, set] of sessionSubscribers.entries()) {
+    const session = activeSessions.get(key);
+    if (!session || (workerId && session.workerId !== workerId)) continue;
+    for (const socketId of Array.from(set)) {
+      const socket = io.sockets.sockets.get(socketId);
+      const socketData = socket?.data as SocketData | undefined;
+      if (socketData?.role === 'client' && socketData.user?.userId === userId) {
+        set.delete(socketId);
+      }
+    }
+    if (set.size === 0) sessionSubscribers.delete(key);
+  }
 };
 
 /**
@@ -111,6 +149,31 @@ export const initSocket = (httpServer: any) => {
       const list = await WorkerModel.getAccessibleWorkers(socketData.user.userId);
       emitWorkerList(socket, applyRuntimeWorkerStatus(list));
     }
+  };
+
+  const revalidateSubscribers = async (
+    workerId: string,
+    subscriberKey: string,
+    requiredPermission: 'view' | 'control' = 'view'
+  ): Promise<string[]> => {
+    const subscribers = sessionSubscribers.get(subscriberKey);
+    if (!subscribers || subscribers.size === 0) return [];
+
+    const allowed = await Promise.all(Array.from(subscribers).map(async (socketId) => {
+      const client = io.sockets.sockets.get(socketId);
+      const socketData = client?.data as SocketData | undefined;
+      if (!client || socketData?.role !== 'client' || !socketData.user) return null;
+      const hasAccess = await WorkerModel.hasAccess(socketData.user.userId, workerId, requiredPermission);
+      return hasAccess ? socketId : null;
+    }));
+
+    const allowedIds = allowed.filter((socketId): socketId is string => Boolean(socketId));
+    const allowedSet = new Set(allowedIds);
+    for (const socketId of Array.from(subscribers)) {
+      if (!allowedSet.has(socketId)) subscribers.delete(socketId);
+    }
+    if (subscribers.size === 0) sessionSubscribers.delete(subscriberKey);
+    return allowedIds;
   };
 
   const broadcastWorkerUpdates = () => {
@@ -304,11 +367,11 @@ export const initSocket = (httpServer: any) => {
         scheduleSessionListBroadcast(true);
         broadcastWorkerUpdates();
       }
-      const removedSessions = removeSocketFromAllSessions(socket.id);
-      if (data.role === 'client' && removedSessions.length > 0) {
+      const removedSessionKeys = removeSocketFromAllSessions(socket.id);
+      if (data.role === 'client' && removedSessionKeys.length > 0) {
         const workerIds = new Set<string>();
-        for (const sessionId of removedSessions) {
-          const session = Array.from(activeSessions.values()).find((s) => s.id === sessionId);
+        for (const key of removedSessionKeys) {
+          const session = activeSessions.get(key);
           if (session) workerIds.add(session.workerId);
         }
         for (const workerId of workerIds) {
@@ -350,7 +413,7 @@ export const initSocket = (httpServer: any) => {
         const userPlan = await getUserPlan(data.user.userId);
         let userSessionCount = 0;
         for (const [, sess] of activeSessions) {
-          const subs = sessionSubscribers.get(sess.id);
+          const subs = sessionSubscribers.get(sessionKey(sess.workerId, sess.id));
           if (subs && subs.has(socket.id)) {
             userSessionCount++;
           }
@@ -375,7 +438,7 @@ export const initSocket = (httpServer: any) => {
 
       const session = await ensureActiveSession(msg.workerId, sessionId, undefined, data.user.userId);
       session.lastActive = Date.now();
-      addSessionSubscriber(sessionId, socket.id);
+      addSessionSubscriber(msg.workerId, sessionId, socket.id);
       io.to(worker.socketId).emit('execute', {
         clientId: socket.id,
         command: msg.command,
@@ -400,7 +463,7 @@ export const initSocket = (httpServer: any) => {
         return;
       }
       await ensureActiveSession(msg.workerId, sessionId, undefined, data.user.userId);
-      addSessionSubscriber(sessionId, socket.id);
+      addSessionSubscriber(msg.workerId, sessionId, socket.id);
       io.to(worker.socketId).emit('resize', {
         clientId: socket.id,
         sessionId,
@@ -409,35 +472,52 @@ export const initSocket = (httpServer: any) => {
       });
     });
 
-    socket.on('output', async (msg: { sessionId?: string; output: string }) => {
+    socket.on('output', (msg: { sessionId?: string; output: string }) => {
       if (data.role !== 'worker' || !data.workerId) return;
       const sessionId = normalizeSessionId(msg.sessionId);
-      const session = await ensureActiveSession(data.workerId, sessionId);
-      session.output = `${session.output}${msg.output}`.slice(-20000);
-      session.lastActive = Date.now();
+      const workerId = data.workerId;
+      const subscriberKey = sessionKey(workerId, sessionId);
+      void outputRelay.enqueue(subscriberKey, {
+        workerId,
+        sessionId,
+        output: msg.output,
+      }, async (batch) => {
+        const session = await ensureActiveSession(workerId, sessionId);
+        for (const item of batch) {
+          session.output = `${session.output}${item.output}`.slice(-20000);
+        }
+        session.lastActive = Date.now();
 
-      const subs = sessionSubscribers.get(sessionId);
-      if (subs && subs.size > 0) {
-        io.to(Array.from(subs)).emit('output', {
-          workerId: data.workerId,
-          sessionId,
-          data: msg.output
-        });
-      }
-      // Debounced session list updates to avoid heavy fan-out on every chunk
-      scheduleSessionListBroadcast();
+        // One current-state authorization pass per ordered batch avoids a DB
+        // query per chunk without introducing a revocation window.
+        const authorizedSocketIds = await revalidateSubscribers(workerId, subscriberKey, 'view');
+        const currentSubscribers = sessionSubscribers.get(subscriberKey);
+        const liveAuthorizedIds = authorizedSocketIds.filter((socketId) => currentSubscribers?.has(socketId));
+        if (liveAuthorizedIds.length > 0) {
+          for (const item of batch) {
+            io.to(liveAuthorizedIds).emit('output', {
+              workerId,
+              sessionId,
+              data: item.output,
+            });
+          }
+        }
+        // Debounced session list updates to avoid heavy fan-out on every chunk.
+        scheduleSessionListBroadcast();
+      }).catch((error) => console.error('[Socket] Output relay error:', error));
     });
 
-    socket.on('session-shell-exited', (msg: { sessionId?: string }) => {
+    socket.on('session-shell-exited', async (msg: { sessionId?: string }) => {
       if (data.role !== 'worker' || !data.workerId) return;
       const sessionId = normalizeSessionId(msg.sessionId);
       const key = sessionKey(data.workerId, sessionId);
       activeSessions.delete(key);
-      const subs = sessionSubscribers.get(sessionId);
-      if (subs && subs.size > 0) {
-        io.to(Array.from(subs)).emit('session-closed', { sessionId });
+      const subscriberKey = sessionKey(data.workerId, sessionId);
+      const authorizedSocketIds = await revalidateSubscribers(data.workerId, subscriberKey, 'view');
+      if (authorizedSocketIds.length > 0) {
+        io.to(authorizedSocketIds).emit('session-closed', { sessionId, workerId: data.workerId });
       }
-      sessionSubscribers.delete(sessionId);
+      sessionSubscribers.delete(subscriberKey);
       scheduleSessionListBroadcast(true);
     });
 
@@ -472,67 +552,83 @@ export const initSocket = (httpServer: any) => {
         if (!hasAccess) return;
 
         await ensureActiveSession(workerId, sessionId, msg.displayName, data.user.userId);
-        addSessionSubscriber(sessionId, socket.id);
+        addSessionSubscriber(workerId, sessionId, socket.id);
         scheduleSessionListBroadcast(true);
       }
     });
 
-    socket.on('join-session', async (msg: { sessionId: string; workerId?: string; displayName?: string }) => {
+    socket.on('join-session', async (msg: { sessionId: string; workerId: string; displayName?: string }) => {
       if (data.role !== 'client' || !data.user) return;
       const sessionId = normalizeSessionId(msg.sessionId || socket.id);
-      addSessionSubscriber(sessionId, socket.id);
-
-      // Look for session to find workerId
-      let workerId = msg.workerId;
+      const workerId = String(msg.workerId || '').trim();
       if (!workerId) {
-        const s = Array.from(activeSessions.values()).find(s => s.id === sessionId);
-        if (s) workerId = s.workerId;
+        socket.emit('error', 'workerId requerido');
+        return;
       }
 
-      if (workerId) {
-        const hasAccess = await WorkerModel.hasAccess(data.user.userId, workerId, 'view');
-        if (hasAccess) {
-          const session = await ensureActiveSession(workerId, sessionId, msg.displayName, data.user.userId);
-          session.lastActive = Date.now();
-        }
+      const hasAccess = await WorkerModel.hasAccess(data.user.userId, workerId, 'view');
+      if (!hasAccess) {
+        socket.emit('error', 'Acceso denegado al worker');
+        return;
       }
+      const session = await ensureActiveSession(workerId, sessionId, msg.displayName, data.user.userId);
+      session.lastActive = Date.now();
+      // Register only after authorization. Adding the socket before this
+      // check let a caller receive future output from another tenant.
+      addSessionSubscriber(workerId, sessionId, socket.id);
       scheduleSessionListBroadcast(true);
     });
 
-    socket.on('leave-session', (msg: { sessionId: string }) => {
+    socket.on('leave-session', (msg: { workerId: string; sessionId: string }) => {
+      if (data.role !== 'client' || !data.user) return;
+      const workerId = String(msg.workerId || '').trim();
+      if (!workerId) {
+        socket.emit('error', 'workerId requerido');
+        return;
+      }
       const sessionId = normalizeSessionId(msg.sessionId || socket.id);
-      removeSessionSubscriber(sessionId, socket.id);
+      removeSessionSubscriber(workerId, sessionId, socket.id);
     });
 
-    socket.on('rename-session', async (msg: { sessionId: string; newName: string }) => {
+    socket.on('rename-session', async (msg: { workerId: string; sessionId: string; newName: string }) => {
       if (data.role !== 'client' || !data.user) return;
+      const workerId = String(msg.workerId || '').trim();
+      if (!workerId) {
+        socket.emit('error', 'workerId requerido');
+        return;
+      }
       const sessionId = normalizeSessionId(msg.sessionId);
       const newName = (msg.newName || '').trim();
       if (!newName) return;
 
-      const session = Array.from(activeSessions.values()).find(s => s.id === sessionId);
+      const session = activeSessions.get(sessionKey(workerId, sessionId));
       if (!session) return;
 
-      const hasAccess = await WorkerModel.hasAccess(data.user.userId, session.workerId, 'control');
+      const hasAccess = await WorkerModel.hasAccess(data.user.userId, workerId, 'control');
       if (!hasAccess) return;
 
       session.displayName = newName;
       try {
-        await db.run('UPDATE sessions SET display_name = ? WHERE id = ?', [newName, sessionId]);
+        await db.run('UPDATE sessions SET display_name = ? WHERE id = ? AND worker_id = ?', [newName, sessionId, workerId]);
       } catch (err) {
         console.error('Failed to update session name in DB:', err);
       }
       scheduleSessionListBroadcast(true);
     });
 
-    socket.on('close-session', async (msg: { sessionId: string }) => {
+    socket.on('close-session', async (msg: { workerId: string; sessionId: string }) => {
       if (data.role !== 'client' || !data.user) return;
+      const workerId = String(msg.workerId || '').trim();
+      if (!workerId) {
+        socket.emit('error', 'workerId requerido');
+        return;
+      }
       const sessionId = normalizeSessionId(msg.sessionId);
 
-      const session = Array.from(activeSessions.values()).find(s => s.id === sessionId);
+      const session = activeSessions.get(sessionKey(workerId, sessionId));
       if (!session) return;
 
-      const hasAccess = await WorkerModel.hasAccess(data.user.userId, session.workerId, 'control');
+      const hasAccess = await WorkerModel.hasAccess(data.user.userId, workerId, 'control');
       if (!hasAccess) return;
 
       const worker = workers.get(session.workerId);
@@ -547,21 +643,28 @@ export const initSocket = (httpServer: any) => {
       activeSessions.delete(key);
 
       // Notify ALL subscribers that this session was closed (cross-device sync)
-      const subs = sessionSubscribers.get(sessionId);
-      if (subs && subs.size > 0) {
-        io.to(Array.from(subs)).emit('session-closed', { sessionId });
+      const subscriberKey = sessionKey(session.workerId, sessionId);
+      const authorizedSocketIds = await revalidateSubscribers(session.workerId, subscriberKey, 'view');
+      if (authorizedSocketIds.length > 0) {
+        io.to(authorizedSocketIds).emit('session-closed', { sessionId, workerId: session.workerId });
       }
-      sessionSubscribers.delete(sessionId);
+      sessionSubscribers.delete(subscriberKey);
       scheduleSessionListBroadcast(true);
     });
 
-    socket.on('get-session-output', async (msg: { sessionId: string }, cb?: (output: string) => void) => {
+    socket.on('get-session-output', async (msg: { workerId: string; sessionId: string }, cb?: (output: string) => void) => {
       if (data.role !== 'client' || !data.user) return;
+      const workerId = String(msg.workerId || '').trim();
+      if (!workerId) {
+        if (cb) cb('');
+        socket.emit('error', 'workerId requerido');
+        return;
+      }
       const sessionId = normalizeSessionId(msg.sessionId);
 
-      const session = Array.from(activeSessions.values()).find(s => s.id === sessionId);
+      const session = activeSessions.get(sessionKey(workerId, sessionId));
       if (session) {
-        const hasAccess = await WorkerModel.hasAccess(data.user!.userId, session.workerId, 'view');
+        const hasAccess = await WorkerModel.hasAccess(data.user!.userId, workerId, 'view');
         if (hasAccess && cb) {
           cb(session.output || '');
         }

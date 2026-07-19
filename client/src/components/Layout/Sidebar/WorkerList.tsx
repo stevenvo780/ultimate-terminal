@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useAppDispatch, useAppSelector } from '../../../store/hooks';
 import {
   setWorkerQuery,
@@ -6,8 +7,10 @@ import {
   setEditingWorker,
   setShowWorkerModal,
   openDialog,
+  selectAgents,
 } from '../../../store';
 import type { Worker } from '../../../store/slices/workersSlice';
+import { plainWorkersOf } from '../../../lib/agents';
 import { Download, Link, Plus, Trash2 } from 'lucide-react';
 import './WorkerList.css';
 
@@ -21,6 +24,10 @@ export function WorkerList({ onSelectWorker, onNewSession }: WorkerListProps) {
   const workerQuery = useAppSelector((state) => state.workers.workerQuery);
   const workerTags = useAppSelector((state) => state.workers.workerTags);
   const filteredWorkers = useAppSelector(selectFilteredWorkers);
+  const agents = useAppSelector(selectAgents);
+  // Los workers que pertenecen a un agente (base + su -tui) se muestran en la
+  // sección "Agentes"; aquí quedan solo los hosts/PCs.
+  const plainWorkers = useMemo(() => plainWorkersOf(filteredWorkers, agents), [filteredWorkers, agents]);
 
   const normalizeWorkerKey = (name: string) => name.trim().toLowerCase();
 
@@ -47,7 +54,7 @@ export function WorkerList({ onSelectWorker, onNewSession }: WorkerListProps) {
 
   return (
     <div className="sidebar-section">
-      <div className="section-title">Workers</div>
+      <div className="section-title">Workers / PCs</div>
       <div className="worker-tools">
         <input
           className="worker-search"
@@ -57,11 +64,11 @@ export function WorkerList({ onSelectWorker, onNewSession }: WorkerListProps) {
         />
       </div>
 
-      {filteredWorkers.length === 0 && (
+      {plainWorkers.length === 0 && (
         <div className="empty-sessions">No hay workers</div>
       )}
 
-      {filteredWorkers.length > 0 && filteredWorkers.map((worker: Worker) => {
+      {plainWorkers.length > 0 && plainWorkers.map((worker: Worker) => {
         const workerKey = normalizeWorkerKey(worker.name);
         const tags = workerTags[workerKey] || [];
         const permission = worker.permission || 'admin';

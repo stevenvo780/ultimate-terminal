@@ -1,0 +1,310 @@
+/* AgentList — sección "Agentes" (TUI viva del modelo). Acento índigo/violeta
+   para distinguirla de "Workers / PCs" (verde). */
+.agent-item {
+  background: linear-gradient(135deg, rgba(17, 14, 30, 0.85) 0%, rgba(22, 18, 40, 0.65) 100%);
+  border: 1px solid rgba(129, 140, 248, 0.18);
+  border-left: 3px solid #818cf8;
+  border-radius: 10px;
+  padding: 12px 12px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 8px;
+  transition: all 200ms ease;
+}
+
+.agent-item:hover {
+  border-color: rgba(129, 140, 248, 0.45);
+  background: linear-gradient(135deg, rgba(22, 18, 44, 0.95) 0%, rgba(28, 22, 52, 0.85) 100%);
+  transform: translateX(2px);
+}
+
+.agent-item.offline {
+  border-left-color: #6b7280;
+  opacity: 0.7;
+}
+
+.agent-item.paused {
+  border-left-color: #f59e0b;
+}
+
+.agent-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.agent-icon {
+  width: 20px;
+  height: 20px;
+  color: #a5b4fc;
+  flex-shrink: 0;
+  stroke-width: 1.8;
+}
+
+.agent-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #eef0ff;
+}
+
+.agent-flag {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.agent-flag.paused {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.agent-model {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.66rem;
+  color: #8b93bd;
+  margin-top: 3px;
+}
+
+.agent-model svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 1.8;
+}
+
+.agent-owner {
+  font-size: 0.72rem;
+  color: #9ca3d4;
+  margin-top: 1px;
+}
+
+.agent-status {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.agent-status.online {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+}
+
+.agent-status.offline {
+  background: #6b7280;
+}
+
+/* sin worker asignado: contorno hueco, distinto del offline (worker caído) */
+.agent-status.none {
+  background: transparent;
+  border: 1.5px solid #6b7280;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 150ms ease;
+}
+
+.agent-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
+}
+
+.agent-btn.tui {
+  color: #c7d2fe;
+  background: rgba(129, 140, 248, 0.14);
+  border-color: rgba(129, 140, 248, 0.3);
+}
+
+.agent-btn.tui:hover:not(:disabled) {
+  background: rgba(129, 140, 248, 0.26);
+  border-color: rgba(129, 140, 248, 0.55);
+}
+
+.agent-btn.shell {
+  color: #9fb3c8;
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(36, 52, 71, 0.6);
+}
+
+.agent-btn.shell:hover {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #bcd3ec;
+}
+
+.agent-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Bloques por tenant/grupo ── */
+.tenant-block {
+  margin-bottom: 12px;
+}
+
+.tenant-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 2px 8px;
+  border-bottom: 1px solid rgba(129, 140, 248, 0.14);
+  margin-bottom: 8px;
+}
+
+.tenant-icon {
+  width: 15px;
+  height: 15px;
+  color: #818cf8;
+  stroke-width: 2;
+}
+
+.tenant-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #d7dbff;
+  letter-spacing: 0.3px;
+  flex: 1;
+}
+
+.tenant-count {
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  background: rgba(129, 140, 248, 0.12);
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tenant-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.66rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.tenant-scope svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2;
+}
+
+.tenant-scope.open {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.tenant-scope.closed {
+  color: #9fb3c8;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+/* ── Sub-línea del agente: harness + rol ── */
+.agent-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.harness-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.harness-badge.h-claude-code {
+  color: #fcd9b6;
+  background: rgba(217, 119, 66, 0.18);
+  border: 1px solid rgba(217, 119, 66, 0.35);
+}
+
+.harness-badge.h-openclaw {
+  color: #c7d2fe;
+  background: rgba(129, 140, 248, 0.16);
+  border: 1px solid rgba(129, 140, 248, 0.32);
+}
+
+.harness-badge.h-codex {
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.harness-badge.h-bot {
+  color: #cbd5e1;
+  background: rgba(100, 116, 139, 0.16);
+  border: 1px solid rgba(100, 116, 139, 0.32);
+}
+
+.agent-role {
+  font-size: 0.7rem;
+  color: #9ca3d4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-note {
+  font-size: 0.68rem;
+  color: #8891b8;
+  font-style: italic;
+  padding-left: 30px;
+}
+
+.agent-note.no-worker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 30px;
+  font-style: normal;
+  color: #7c85a8;
+}
+
+.agent-note.no-worker svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.8;
+  flex-shrink: 0;
+}

@@ -52,6 +52,44 @@ export const initDatabase = async () => {
     // Column already exists — ignore
   }
 
+  // Migration: scope de usuario a un tenant (NULL = global/admin, no rompe users existentes)
+  try {
+    await db.exec(`ALTER TABLE users ADD COLUMN tenant_id TEXT`);
+    console.log('[Nexus] Added tenant_id column to users table');
+  } catch (_e) { /* ya existe — ignorar */ }
+
+  // Tenants (personas / grupos de bus). PK textual (slug) → NO usa AUTO_INC.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS tenants (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      bus_group TEXT NOT NULL,
+      open_to_all INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // Agents (registry de la flota, ex-array estático de client/src/lib/agents.ts).
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id ${AUTO_INC},
+      tenant_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      harness TEXT NOT NULL DEFAULT 'claude-code',
+      tui_worker TEXT,
+      shell_worker TEXT,
+      model TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      metadata TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      UNIQUE(tenant_id, key)${isPg ? ', PRIMARY KEY (id)' : ''}
+    );
+  `);
+
   // Workers
   await db.exec(`
     CREATE TABLE IF NOT EXISTS workers (

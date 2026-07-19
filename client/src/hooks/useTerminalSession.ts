@@ -264,6 +264,7 @@ export function useTerminalSession(): UseTerminalSessionReturn {
 
   const closeSession = useCallback((sessionId: string, socket: { emit: (event: string, data: unknown) => void }) => {
     const instance = terminalInstances.current.get(sessionId);
+    const workerId = instance?.workerId ?? sessions.find((session) => session.id === sessionId)?.workerId;
     if (instance) {
       window.removeEventListener('resize', instance.resizeHandler);
       instance.terminal.dispose();
@@ -275,17 +276,19 @@ export function useTerminalSession(): UseTerminalSessionReturn {
     delete inputBuffersRef.current[sessionId];
     delete escapeInputRef.current[sessionId];
 
-    socket.emit('close-session', { sessionId });
+    if (workerId) socket.emit('close-session', { workerId, sessionId });
     dispatch(removeSession(sessionId));
-  }, [dispatch]);
+  }, [dispatch, sessions]);
 
   const renameSession = useCallback((sessionId: string, newName: string, socket: { emit: (event: string, data: unknown) => void }) => {
     const trimmedName = newName.trim();
     if (!trimmedName) return;
+    const workerId = terminalInstances.current.get(sessionId)?.workerId
+      ?? sessions.find((session) => session.id === sessionId)?.workerId;
 
     dispatch(updateSession({ id: sessionId, displayName: trimmedName }));
-    socket.emit('rename-session', { sessionId, newName: trimmedName });
-  }, [dispatch]);
+    if (workerId) socket.emit('rename-session', { workerId, sessionId, newName: trimmedName });
+  }, [dispatch, sessions]);
 
   const fitAndResizeSession = useCallback((sessionId: string, socket: { emit: (event: string, data: unknown) => void }) => {
     const instance = terminalInstances.current.get(sessionId);

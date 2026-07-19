@@ -1,10 +1,11 @@
 [Unit]
 Description=Ultimate Terminal Nexus Server
 Documentation=https://github.com/stevenvo780/ultimate-terminal
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=60
-StartLimitBurst=3
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+# PostgreSQL puede tardar más que Nexus después de un reinicio del host. No
+# agotar los reintentos mientras la base de datos termina de levantar.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -14,7 +15,7 @@ EnvironmentFile=/etc/ultimate-terminal/nexus.env
 ExecStart=/usr/bin/ultimate-terminal-nexus
 WorkingDirectory=/var/lib/ultimate-terminal
 Restart=always
-RestartSec=5
+RestartSec=10
 
 # Security hardening
 NoNewPrivileges=true
